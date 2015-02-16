@@ -1,0 +1,13 @@
+#!/usr/bin/ruby -w
+#
+# Extract the dictionary from the Brotli specification to stdout.  This assumes
+# that the dictionary is provided as lines of exactly 64 adjacent hex
+# characters, including the last line.  Each such line may have leading or
+# trailing space, but no other characters or HTML tags.  The length of the
+# dictionary in bytes should be 122784.
+
+require 'open-uri'
+spec = "https://tools.ietf.org/html/draft-alakuijala-brotli-02"
+open(spec).each do |line|
+    line.scan(/\h{2}/) {|byte| putc byte.to_i(16)} if line =~ /^\s*\h{64}\s*$/
+end

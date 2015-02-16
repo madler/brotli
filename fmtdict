@@ -1,0 +1,19 @@
+#!/usr/bin/ruby -w
+#
+# Convert the dictionary from stdin to a C literal array on stdout.  PER is the
+# number of literal bytes per line.  IND is the number of spaces to indent.
+# (This leaves a hanging comma at the end, but C is okay with that.)
+
+PER = 12
+IND = 4
+
+num = 0
+puts " "*IND + "const unsigned char brotli_dict[] = {"
+ARGF.each_byte do |byte|
+    print " "*IND, "    " if num == 0
+    printf "0x%02x,", byte
+    print num == PER - 1 ? "\n" : " "
+    num = (num + 1) % PER;
+end
+puts if num != 0
+puts " "*IND + "};"
