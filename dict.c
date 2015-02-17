@@ -11,6 +11,8 @@ static const unsigned ndbits[] = {
     6, 5, 5
 };
 
+static size_t max = 1;
+
 /* Show one character in a word, honoring UTF-8 when a legal UTF-8 character is
    presented, and converting control and other non-printable characters to
    escape codes.  The number of bytes consumed in str is returned.  No more
@@ -38,8 +40,11 @@ static size_t show_char(unsigned char *str, size_t len)
         for (n = 1; n < used && n < len; n++)
             if (str[n] < 0x80 || str[n] >= 0xc0)
                 break;
-        if (n == used)
+        if (n == used) {
             fwrite(str, 1, used, stdout);
+            if (max < used)
+                max = used;
+        }
         else {
             printf("\\x%02x", *str);
             used = 1;
@@ -79,6 +84,7 @@ static void show_dict(size_t tot)
             next += len;
         } while (--num);
     }
+    printf("\nmax UTF-8 length = %lu\n", max);
 }
 
 int main(void)
