@@ -41,6 +41,17 @@
 #  define trace(...)
 #endif
 
+/*
+ * Assured memory allocation.
+ */
+local void *alloc(void *mem, size_t size)
+{
+    mem = realloc(mem, size);
+    if (size && mem == NULL)
+        throw(1, "out of memory");
+    return mem;
+}
+
 /* The maximum number of bits in a prefix code. */
 #define MAXBITS 15
 
@@ -66,7 +77,7 @@ typedef struct {
 } prefix_t;
 
 /*
- * Brotli decoding state.
+ * Brotli decoding state.  About 26K bytes, plus allocated prefix codes.
  */
 typedef struct {
     /* input state */
@@ -96,10 +107,25 @@ typedef struct {
     unsigned short dist_type;       /* distance type currently in use */
     size_t dist_left;               /* number of distances left of this type */
 
+    /* distance code decoding */
+    uint32_t ring[4];               /* ring buffer of previous distances */
+    unsigned short ring_ptr;        /* index of last distance in ring buffer */
+    unsigned char postfix;          /* log2 of # of interleavings (0..3) */
+    unsigned char direct;           /* number of direct distance codes */
+
     /* codes */
-    prefix_t *lit_code;             /* literal codes (allocated) */
-    prefix_t *iac_code;             /* insert codes (allocated) */
-    prefix_t *dist_code;            /* distance codes (allocated) */
+    unsigned short lit_codes;       /* number of literal prefix codes */
+    unsigned short dist_codes;      /* number of distance prefix codes */
+    prefix_t *lit_code;             /* lit_codes literal codes (allocated) */
+    prefix_t *iac_code;             /* iac_num insert codes (allocated) */
+    prefix_t *dist_code;            /* dist_codes distance codes (allocated) */
+
+    /* context */
+    unsigned char mode[256];        /* modes for lit_num literal types */
+    unsigned char lit_map[64*256];  /* literal context map */
+    unsigned char dist_map[4*256];  /* distance context map */
+
+    /* codes for prefix code changes */
     prefix_t lit_types;             /* literal block types */
     prefix_t lit_count;             /* literal block lengths */
     prefix_t iac_types;             /* insert and copy block types */
@@ -119,7 +145,7 @@ local void deliver(state_t *s, unsigned char const *data, size_t len)
 }
 
 /*
- * Return need bits from the input stream.  need must be in 0..57.  This will
+ * Return need bits from the input stream.  need must be in 0..26.  This will
  * leave 0..7 bits in s->bits.
  *
  * Format notes:
@@ -128,25 +154,23 @@ local void deliver(state_t *s, unsigned char const *data, size_t len)
  *   significant bit.  Therefore bits are dropped from the bottom of the bit
  *   buffer, using shift right, and new bytes are appended to the top of the
  *   bit buffer, using shift left.
- *
- * - Up to 28 bits may be requested (for a macro-block length).
  */
-local uint64_t bits(state_t *s, unsigned need)
+local uint32_t bits(state_t *s, unsigned need)
 {
-    uint64_t reg;       /* register in which to accumulate need bits */
+    uint32_t reg;       /* register in which to accumulate need bits */
 
-    assert(need < 58);
+    assert(need < 26);
     reg = s->bits;
     while (s->left < need) {
         if (s->len == 0)
             throw(2, "premature end of input");
-        reg |= (uint64_t)(*(s->next)++) << s->left;
+        reg |= (uint32_t)(*(s->next)++) << s->left;
         s->len--;
         s->left += 8;
     }
     s->bits = reg >> need;
     s->left -= need;
-    return reg & (((uint64_t)1 << need) - 1);
+    return reg & (((uint32_t)1 << need) - 1);
 }
 
 /*
@@ -207,8 +231,10 @@ local unsigned decode(state_t *s, const prefix_t *p)
  *   bits.  This function is not called in that case, nor is it called for the
  *   other simple prefix codes since the symbols are provided differently in
  *   that descriptor.  For those, simple() is called instead.
+ *
+ * - The brotli format limits the lengths of codes to 15 bits.
  */
-local void construct(prefix_t *p, unsigned short const *length, unsigned n)
+local void construct(prefix_t *p, unsigned char const *length, unsigned n)
 {
     unsigned symbol;                /* current symbol */
     unsigned len;                   /* current length */
@@ -240,11 +266,15 @@ local void construct(prefix_t *p, unsigned short const *length, unsigned n)
     }
 }
 
-/* Define SORTSIMPLE if the symbols provided in simple codes should be sorted
-   within bit lengths to assure a canonical code.  Define SORTCHECK for ORDER
-   to verify that the symbols are already sorted and therefore that the
-   generated code is canonical.  Otherwise, do not check or reorder the
-   symbols. */
+#define SORTSIMPLE
+
+/*
+ * Define SORTSIMPLE if the symbols provided in simple codes should be sorted
+ * within bit lengths to assure a canonical code.  Define SORTCHECK for ORDER
+ * to verify that the symbols are already sorted and therefore that the
+ * generated code is canonical.  Otherwise, do not check or reorder the
+ * symbols.
+ */
 #if defined(SORTSIMPLE)
 #  define ORDER(list, i, j) \
     do { \
@@ -269,17 +299,8 @@ local void construct(prefix_t *p, unsigned short const *length, unsigned n)
  * type is 1 for one symbol of zero length; 2 for two symbols each of length 1;
  * 3 for three symbols of code lengths of 1, 2, 2; 4 for four symbols of code
  * lengths 2, 2, 2, 2; and 5 for four symbols of code lengths 1, 2, 3, 3.
- *
- * Format note:
- * - The symbols provided in the stream for the same bit length might not be in
- *   sorted order.  In fact, the example file asyoulike.txt.compressed has such
- *   a simple code for the distance block length code, where symbol 21 with
- *   code length 3 precedes symbol 20 with code length 3.  So not all prefix
- *   codes used in brotli are canonical (as claimed in verison 02 of the
- *   specification).  Therefore, neither SORTSIMPLE nor SORTCHECK should be
- *   #defined.
  */
-local void simple(prefix_t *p, unsigned short const *syms, unsigned type)
+local void simple(prefix_t *p, unsigned short *syms, unsigned type)
 {
     unsigned n;
 
@@ -323,7 +344,7 @@ local void simple(prefix_t *p, unsigned short const *syms, unsigned type)
 }
 
 /*
- * Read in a prefix code description and save the tables in p.  max is the
+ * Read in a prefix code description and save the tables in p.  num is the
  * maximum number of symbols in the alphabet.
  */
 local void prefix(state_t *s, prefix_t *p, unsigned num)
@@ -338,10 +359,10 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
 
     /* simple prefix code */
     if (hskip == 1) {
-        unsigned n;
         unsigned abits;             /* alphabet bits */
         unsigned sym;               /* symbol */
         unsigned short syms[4];     /* symbols for this code */
+        unsigned n;
 
         trace("simple prefix code");
 
@@ -357,7 +378,9 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         nsym = bits(s, 2) + 1;
         for (n = 0; n < nsym; n++) {
             sym = bits(s, abits);
-            syms[n] = sym < num ? sym : sym - num;
+            if (sym >= num)
+                throw(3, "modulo really needed?");
+            syms[n] = sym;
         }
 
         /* make nsym 5 for the second 4-symbol simple code */
@@ -372,50 +395,51 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
     else {
         int32_t left;           /* number of code values left */
         unsigned len;           /* number of bits in code */
-        unsigned last;          /* last len */
+        unsigned last;          /* last non-zero length */
         unsigned rep;           /* number of times to repeat last len */
         unsigned zeros;         /* number of times to repeat zero */
-        unsigned n, k;
-
-        /* initially the code for code length code lengths, then reused for
-           code lengths */
-        prefix_t code = {{0, 0, 3, 1, 2}, {0, 3, 4, 2, 1, 5}};
+        unsigned n;
 
         /* order of code length code lengths */
         unsigned short const order[] = {
             1, 2, 3, 4, 0, 5, 17, 6, 16, 7, 8, 9, 10, 11, 12, 13, 14, 15
         };
 
-        /* lengths read for code lengths code, then reused for code */
-        unsigned short lens[num < 18 ? 18 : num];
+        /* initially the code for code length code lengths, then reused for
+           the code lengths code */
+        prefix_t code = {{0, 0, 3, 1, 2}, {0, 3, 4, 2, 1, 5}};
+
+        /* lengths read for the code lengths code, then reused for the code */
+        unsigned char lens[num < 18 ? 18 : num];
 
         trace("complex prefix code");
 
-        /* read code length code lengths and make code length code */
+        /* read the code length code lengths using the fixed code length code
+           lengths code above, and make the code length code for reading the
+           code lengths (seriously) */
         left = 1 << 5;
-        for (n = 0; n < hskip; n++)
-            lens[order[n]] = 0;
-        for (; n < 18; n++) {
+        nsym = 0;
+        while (nsym < hskip)
+            lens[order[nsym++]] = 0;
+        while (nsym < 18) {
             len = decode(s, &code);
-            lens[order[n]] = len;
+            lens[order[nsym++]] = len;
             if (len) {
                 left -= (1 << 5) >> len;
-                if (left <= 0) {
-                    n++;
+                if (left <= 0)
                     break;
-                }
             }
         }
         if (left < 0)
             throw(3, "oversubscribed code length code");
         if (left)
             throw(3, "incomplete code length code");
-        for (; n < 18; n++)
-            lens[order[n]] = 0;
+        while (nsym < 18)
+            lens[order[nsym++]] = 0;
         construct(&code, lens, 18);
 
-        /* read code lengths and make code */
-        left = 1U << MAXBITS;
+        /* read the code lengths */
+        left = (int32_t)1 << MAXBITS;
         last = 8;
         rep = 0;
         zeros = 0;
@@ -423,40 +447,55 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         do {
             len = decode(s, &code);
             if (len < 16) {
+                /* not coded (0), or a code length in 1..15 -- only update last
+                   if the length is not zero */
                 if (nsym == num)
                     throw(3, "too many symbols");
                 lens[nsym++] = len;
                 if (len) {
-                    left -= (1U << MAXBITS) >> len;
+                    left -= ((int32_t)1 << MAXBITS) >> len;
                     last = len;
                 }
                 rep = 0;
                 zeros = 0;
             }
             else if (len == 16) {
-                rep = rep ? 3 * rep - 5 : 3;
-                rep += bits(s, 2);
-                for (k = 0; k < rep; k++) {
-                    if (nsym == num)
-                        throw(3, "too many symbols");
+                /* repeat the last non-zero length (or 8 if no such length) a
+                   number of times determined by the next two bits and the
+                   previous repeat-last, if the previous one immediately
+                   preceded this one */
+                n = rep;
+                rep = (rep ? (rep - 2) << 2 : 0) + 3 + bits(s, 2);
+                n = rep - n;
+                if (nsym + n > num)
+                    throw(3, "too many symbols");
+                left -= n * (((int32_t)1 << MAXBITS) >> last);
+                if (left < 0)
+                    break;
+                do {
                     lens[nsym++] = last;
-                    left -= (1 << 15) >> last;
-                }
+                } while (--n);
                 zeros = 0;
             }
             else {  /* len == 17 */
-                zeros = zeros ? 7 * zeros - 13 : 3;
-                zeros += bits(s, 3);
-                for (k = 0; k < zeros; k++) {
-                    if (nsym == num)
-                        throw(3, "too many symbols");
+                /* insert a run of zeros whose length is determined by the next
+                   three bits and the length of the previous run of zeroes, if
+                   the previous one immediately preceded this one */
+                n = zeros;
+                zeros = (zeros ? (zeros - 2) << 3 : 0) + 3 + bits(s, 3);
+                n = zeros - n;
+                if (nsym + n > num)
+                    throw(3, "too many symbols");
+                do {
                     lens[nsym++] = 0;
-                }
+                } while (--n);
                 rep = 0;
             }
         } while (left > 0);
         if (left < 0)
             throw(3, "oversubscribed code");
+
+        /* make the code */
         construct(p, lens, nsym);
     }
 
@@ -467,8 +506,14 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
 
         i = 0;
         for (n = 0; n <= MAXBITS; n++)
-            for (k = 0; k < p->count[n]; k++)
-                trace("  %u: %u", n, p->symbol[i++]);
+            for (k = 0; k < p->count[n]; k++, i++)
+                if (num == 256 && p->symbol[i] >= ' ' && p->symbol[i] <= '~')
+                    trace("  %u: '%s%c'",
+                          n, p->symbol[i] == '\'' ||
+                             p->symbol[i] == '\\' ? "\\" : "",
+                          p->symbol[i]);
+                else
+                    trace("  %u: %u", n, p->symbol[i]);
     }
 #endif
 }
@@ -494,7 +539,6 @@ local size_t block_length(state_t *s, prefix_t *p)
     };
 
     sym = decode(s, p);
-    trace("block length symbol %u", sym);
     assert(sym < BLOCK_LENGTH_CODES);
     return (size_t)base[sym] + bits(s, extra[sym]);
 }
@@ -502,11 +546,12 @@ local size_t block_length(state_t *s, prefix_t *p)
 /*
  * Decode the number of block types.
  *
- * Format note: Version 02 of the brotli specification is rather misleading on
- * - how this is coded.  The "variable length code" is actually a leading 0 or
- *   1, followed by a three-bit integer (not a reversed code) which is the
- *   number of extra bits as well as a value from which the base can be readily
- *   computed.  That is followed by the extra bits, not reversed.
+ * Format note:
+ * - Version 02 of the brotli specification is rather misleading on how this is
+ *   coded.  The "variable length code" is actually a leading 0 or 1, followed
+ *   by a three-bit integer (not a reversed code) which is the number of extra
+ *   bits as well as a value from which the base can be readily computed.  That
+ *   is followed by the extra bits, not reversed.
  *
  *   The specification shows "1011xxx" for the range 9-16.  So in that format,
  *   the value 13 is 1011100.  If this were actually a variable-length code, it
@@ -528,14 +573,82 @@ local unsigned block_types(state_t *s)
 }
 
 /*
+ * Read a context map into map[0..len-1], with entries in the range 0..trees-1.
+ */
+local void context_map(state_t *s, unsigned char *map, size_t len,
+                       unsigned trees)
+{
+    unsigned rlemax;        /* maximum run-length directive */
+    unsigned sym;           /* decoded symbol */
+    size_t zeros;           /* number of zeros to write */
+    unsigned n;             /* map index */
+    prefix_t code;          /* map code */
+
+    /* get the code to read the map */
+    rlemax = bits(s, 1) ? 1 + bits(s, 4) : 0;
+    if ((size_t)1 << rlemax > len)
+        throw(3, "rlemax of %u unnecessarily large for map length",
+              rlemax);
+    trace("%srun length code, rlemax = %u (max run %zu)",
+          rlemax ? "" : "no ", rlemax, ((size_t)1 << (rlemax + 1)) - 1);
+    trace("context map code (%u+%u):", rlemax, trees);
+    prefix(s, &code, rlemax + trees);
+
+    /* read the map, expanding runs of zeros */
+    n = 0;
+    do {
+        sym = decode(s, &code);
+        if (sym == 0) {
+            map[n++] = 0;
+            trace("  value 0 (have %u)", n);
+        }
+        else if (sym <= rlemax) {
+            zeros = ((size_t)1 << sym) + bits(s, sym);
+            if (n + zeros > len)
+                throw(3, "run length too long");
+            trace("  %zu 0's (have %zu)", zeros, n + zeros);
+            do {
+                map[n++] = 0;
+            } while (--zeros);
+        }
+        else {
+            map[n++] = sym - rlemax;
+            trace("  value %u (have %u)", sym - rlemax, n);
+        }
+    } while (n < len);
+
+    /* do an inverse move-to-front transform if requested */
+    if (bits(s, 1)) {
+        unsigned char table[trees];
+
+        trace("inverse move-to-front");
+        for (n = 0; n < trees; n++)
+            table[n] = n;
+        for (n = 0; n < len; n++) {
+            sym = map[n];
+            assert(sym < trees);
+            map[n] = table[sym];
+            if (sym) {
+                do {
+                    table[sym] = table[sym - 1];
+                } while (--sym);
+                table[0] = map[n];
+            }
+        }
+    }
+}
+
+/*
  * Decompress one meta-block.  Return true if this is the last meta-block.
  */
 local unsigned metablock(state_t *s)
 {
     unsigned last;              /* true if this is the last meta-block */
-    unsigned nybs;              /* number of nybbles in the length */
-    unsigned types;             /* number of types of each code */
     size_t mlen;                /* number of uncompressed bytes */
+    unsigned dists;             /* number of distance codes */
+    unsigned n;
+
+    /* read and process the meta-block header */
 
     /* get last marker, and check for empty block if last */
     last = bits(s, 1);
@@ -547,11 +660,14 @@ local unsigned metablock(state_t *s)
         }
     }
 
-    /* get number of bytes to decompress in meta-block */
-    nybs = bits(s, 2) + 4;
-    mlen = bits(s, nybs << 2) + 1;
-    if (nybs > 4 && (mlen >> ((nybs - 1) << 2)) == 0)
-        throw(3, "more meta-block length nybbles than needed");
+    /* get the number of bytes to decompress in meta-block */
+    n = bits(s, 2);
+    mlen = 1 + bits(s, 16);
+    if (n) {
+        mlen += bits(s, n << 2) << 16;
+        if ((mlen >> ((n + 3) << 2)) == 0)
+            throw(3, "more meta-block length nybbles than needed");
+    }
     trace("%zu uncompressed byte%s", mlen, mlen == 1 ? "" : "s");
 
     /* check for and process uncompressed data */
@@ -574,14 +690,14 @@ local unsigned metablock(state_t *s)
         return last;
     }
 
-    /* get literal type and count codes */
+    /* get the literal type and count codes */
     s->lit_prev = 0;
     s->lit_last = 1;
     s->lit_type = 0;
-    s->lit_num = types = block_types(s);
-    trace("%u literal code type%s", types, types == 1 ? "" : "s");
-    if (types > 1) {
-        prefix(s, &s->lit_types, types + 2);
+    s->lit_num = block_types(s);
+    trace("%u literal code type%s", s->lit_num, s->lit_num == 1 ? "" : "s");
+    if (s->lit_num > 1) {
+        prefix(s, &s->lit_types, s->lit_num + 2);
         prefix(s, &s->lit_count, BLOCK_LENGTH_CODES);
         s->lit_left = block_length(s, &s->lit_count);
         trace("%zu literal%s of the first type",
@@ -590,14 +706,14 @@ local unsigned metablock(state_t *s)
     else
         s->lit_left = (size_t)0 - 1;
 
-    /* get insert and copy type and count codes */
+    /* get the insert and copy type and count codes */
     s->iac_prev = 0;
     s->iac_last = 1;
     s->iac_type = 0;
-    s->iac_num = types = block_types(s);
-    trace("%u insert code type%s", types, types == 1 ? "" : "s");
-    if (types > 1) {
-        prefix(s, &s->iac_types, types + 2);
+    s->iac_num = block_types(s);
+    trace("%u insert code type%s", s->iac_num, s->iac_num == 1 ? "" : "s");
+    if (s->iac_num > 1) {
+        prefix(s, &s->iac_types, s->iac_num + 2);
         prefix(s, &s->iac_count, BLOCK_LENGTH_CODES);
         s->iac_left = block_length(s, &s->iac_count);
         trace("%zu insert%s of the first type",
@@ -606,14 +722,14 @@ local unsigned metablock(state_t *s)
     else
         s->iac_left = (size_t)0 - 1;
 
-    /* get distance type and count codes */
+    /* get the distance type and count codes */
     s->dist_prev = 0;
     s->dist_last = 1;
     s->dist_type = 0;
-    s->dist_num = types = block_types(s);
-    trace("%u distance code type%s", types, types == 1 ? "" : "s");
-    if (types > 1) {
-        prefix(s, &s->dist_types, types + 2);
+    s->dist_num = block_types(s);
+    trace("%u distance code type%s", s->dist_num, s->dist_num == 1 ? "" : "s");
+    if (s->dist_num > 1) {
+        prefix(s, &s->dist_types, s->dist_num + 2);
         prefix(s, &s->dist_count, BLOCK_LENGTH_CODES);
         s->dist_left = block_length(s, &s->dist_count);
         trace("%zu distance%s of the first type",
@@ -622,12 +738,60 @@ local unsigned metablock(state_t *s)
     else
         s->dist_left = (size_t)0 - 1;
 
+    /* get NPOSTFIX and NDIRECT for distance code decoding */
+    s->postfix = bits(s, 2);
+    s->direct = bits(s, 4) << s->postfix;
+    dists = 16 + s->direct + (48 << s->postfix);
+    trace("%u direct distance codes (%u total)", s->direct, dists);
+
+    /* get the context modes for each literal type */
+    trace("%u literal type context mode%s",
+          s->lit_num, s->lit_num == 1 ? "" : "s");
+    for (n = 0; n < s->lit_num; n++)
+        s->mode[n] = bits(s, 2);
+
+    /* get the number of literal prefix codes and literal context map */
+    s->lit_codes = block_types(s);
+    trace("NTREESL = %u", s->lit_codes);
+    if (s->lit_codes > 1)
+        context_map(s, s->lit_map, s->lit_num << 6, s->lit_codes);
+
+    /* get the number of distance prefix codes and distance context map */
+    s->dist_codes = block_types(s);
+    trace("NTREESD = %u", s->dist_codes);
+    if (s->dist_codes > 1)
+        context_map(s, s->dist_map, s->dist_num << 2, s->dist_codes);
+
+    /* get lit_codes literal prefix codes */
+    trace("%u literal prefix code%s:",
+          s->lit_codes, s->lit_codes == 1 ? "" : "s");
+    s->lit_code = alloc(NULL, s->lit_codes * sizeof(prefix_t));
+    for (n = 0; n < s->lit_codes; n++)
+        prefix(s, s->lit_code + n, 256);
+
+    /* get iac_num insert and copy prefix codes */
+    trace("%u insert and copy prefix code%s:",
+          s->iac_num, s->iac_num == 1 ? "" : "s");
+    s->iac_code = alloc(NULL, s->iac_num * sizeof(prefix_t));
+    for (n = 0; n < s->iac_num; n++)
+        prefix(s, s->iac_code + n, 704);
+
+    /* get dist_codes distance prefix codes */
+    trace("%u distance prefix code%s:",
+          s->dist_codes, s->dist_codes == 1 ? "" : "s");
+    s->dist_code = alloc(NULL, s->dist_codes * sizeof(prefix_t));
+    for (n = 0; n < s->dist_codes; n++)
+        prefix(s, s->dist_code + n, dists);
+
+    /* done with header */
+
     /* return true if this is the last meta-block */
     return 1 /* %% should be return last -- stop here for now */;
 }
 
 /*
- * Initialize brotli state.
+ * Initialize brotli state.  The distances ring buffer is only initialized
+ * at the start of the stream (not at the start of each meta-block).
  */
 local void init_state(state_t *s, void const *comp, size_t len)
 {
@@ -635,6 +799,11 @@ local void init_state(state_t *s, void const *comp, size_t len)
     s->len = len;
     s->bits = 0;
     s->left = 0;
+    s->ring[0] = 16;
+    s->ring[1] = 15;
+    s->ring[2] = 11;
+    s->ring[3] = 4;
+    s->ring_ptr = 3;
     s->lit_code = NULL;
     s->iac_code = NULL;
     s->dist_code = NULL;
