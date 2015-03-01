@@ -1,8 +1,8 @@
-/* Decompress a brotli stream from stdin using iltorb. */
+/* Decompress a brotli stream from stdin using yeast. */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "iltorb.h"
+#include "yeast.h"
 
 /* Load the entire file into a memory buffer.  load() returns 0 on success, in
    which case it puts all of the file data in *dat[0..*len - 1].  That is,
@@ -103,10 +103,10 @@ int main(int argc, char **argv)
             }
             fputs(*argv, stderr);
             fputs(":\n", stderr);
-            ret = iltorb(comp, len);
+            ret = yeast(comp, len);
             free(comp);
             if (ret)
-                fprintf(stderr, "iltorb() returned %d\n", ret);
+                fprintf(stderr, "yeast() returned %d\n", ret);
             if (--argc == 0)
                 break;
             putc('\n', stderr);
@@ -119,10 +119,10 @@ int main(int argc, char **argv)
                   stderr);
             return 1;
         }
-        ret = iltorb(comp, len);
+        ret = yeast(comp, len);
         free(comp);
         if (ret)
-            fprintf(stderr, "iltorb() returned %d\n", ret);
+            fprintf(stderr, "yeast() returned %d\n", ret);
     }
     return 0;
 }

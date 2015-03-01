@@ -1,9 +1,9 @@
 /*
- * iltorb.c
+ * yeast.c
  * Copyright (C) 2015 Mark Adler
  * For conditions of distribution and use, see the accompanying LICENSE file.
  *
- * iltorb.c is a simple decompressor of the brotli format, written to both test
+ * yeast.c is a simple decompressor of the brotli format, written to both test
  * the completeness and correctness of the brotli specification, and once
  * verified, to provide an unambiguous specification of the format by virtue of
  * being a working decoder.  It is a higher priority for this code be simple
@@ -18,7 +18,7 @@
 #include <inttypes.h>
 #include <assert.h>
 #include "try.h"
-#include "iltorb.h"
+#include "yeast.h"
 
 /* Verify that size_t is at least 32 bits. */
 #if SIZE_MAX < 4294967295
@@ -33,7 +33,7 @@
 #  include <stdio.h>
 #  define trace(...) \
     do { \
-        fputs("iltorb: ", stderr); \
+        fputs("yeast: ", stderr); \
         fprintf(stderr, __VA_ARGS__); \
         putc('\n', stderr); \
     } while (0)
@@ -825,7 +825,7 @@ local void free_state(state_t *s)
 /*
  * Decompress the compressed brolti stream: comp[0..len-1].
  */
-int iltorb(void const *comp, size_t len)
+int yeast(void const *comp, size_t len)
 {
     state_t s;
     ball_t err;
