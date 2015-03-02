@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "yeast.h"
 
 /* Load the entire file into a memory buffer.  load() returns 0 on success, in
@@ -75,14 +76,47 @@ static int load(FILE *in, unsigned char **dat, size_t *len, size_t limit)
     return 0;
 }
 
+#define SUFFIX ".compressed"
+#define OUT ".out"
+
+/* Write the decompressed output to a derived file name with extension ".out". */
+static void deliver(char *in, void *data, size_t len)
+{
+    char *out;
+    FILE *file;
+    size_t inlen;
+    ssize_t prefix;
+
+    inlen = strlen(in);
+    out = malloc(inlen + strlen(OUT) + 1);
+    if (out == NULL) {
+        fprintf(stderr, "out of memory");
+        return;
+    }
+    prefix = inlen - strlen(SUFFIX);
+    prefix = prefix < 0 || strcmp(in + prefix, SUFFIX) ? inlen : prefix;
+    memcpy(out, in, prefix);
+    strcpy(out + prefix, OUT);
+    file = fopen(out, "wb");
+    if (file == NULL) {
+        fprintf(stderr, "could not create %s", out);
+        free(out);
+        return;
+    }
+    fwrite(data, 1, len, file);
+    fclose(file);
+    free(out);
+}
+
 /* Decompress all of the files on the command line, or from stdin if no
    arguments. */
 int main(int argc, char **argv)
 {
     FILE *in;
     int ret;
-    unsigned char *comp;
-    size_t len;
+    unsigned char *source;
+    void *dest;
+    size_t len, got;
 
     if (--argc) {
         for (;;) {
@@ -91,7 +125,7 @@ int main(int argc, char **argv)
                 fprintf(stderr, "error opening %s\n", *argv);
                 continue;
             }
-            ret = load(in, &comp, &len, 0);
+            ret = load(in, &source, &len, 0);
             fclose(in);
             if (ret < 0) {
                 fprintf(stderr, "error reading %s\n", *argv);
@@ -103,26 +137,32 @@ int main(int argc, char **argv)
             }
             fputs(*argv, stderr);
             fputs(":\n", stderr);
-            ret = yeast(comp, len);
-            free(comp);
+            ret = yeast(source, &len, &dest, &got);
+            fprintf(stderr, "uncompressed length = %zu\n", got);
             if (ret)
                 fprintf(stderr, "yeast() returned %d\n", ret);
+            deliver(*argv, dest, got);
+            free(dest);
+            free(source);
             if (--argc == 0)
                 break;
             putc('\n', stderr);
         }
     }
     else {
-        ret = load(stdin, &comp, &len, 0);
+        ret = load(stdin, &source, &len, 0);
         if (ret) {
             fputs(ret > 0 ? "out of memory\n" : "error reading stdin\n",
                   stderr);
             return 1;
         }
-        ret = yeast(comp, len);
-        free(comp);
+        ret = yeast(source, &len, &dest, &got);
+        fprintf(stderr, "uncompressed length = %zu\n", got);
         if (ret)
             fprintf(stderr, "yeast() returned %d\n", ret);
+        deliver(NULL, dest, got);
+        free(dest);
+        free(source);
     }
     return 0;
 }
