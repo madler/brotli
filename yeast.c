@@ -194,7 +194,7 @@ local uint32_t bits(state_t *s, unsigned need)
  *   when decoding a prefix code is running out of input bits.  (bits() will
  *   throw an error in that case.)
  */
-local unsigned decode(state_t *s, const prefix_t *p)
+local unsigned decode(state_t *s, prefix_t const *p)
 {
     unsigned len = 0;       /* current number of bits in code */
     unsigned first = 0;     /* first code of length len */
@@ -931,7 +931,9 @@ local unsigned metablock(state_t *s)
         if (s->iac_left == 0) {
             /* change to a new insert and copy type */
             n = decode(s, &s->iac_types);
-            n = n == 0 ? s->iac_prev : n == 1 ? s->iac_last + 1 : n - 2;
+            n = n > 1 ? n - 2 :
+                n ? (s->iac_last + 1) % s->iac_num :
+                s->iac_prev;
             s->iac_prev = s->iac_last;
             s->iac_last = s->iac_type;
             s->iac_type = n;
@@ -952,7 +954,9 @@ local unsigned metablock(state_t *s)
             if (s->lit_left == 0) {
                 /* change to a new literal type */
                 n = decode(s, &s->lit_types);
-                n = n == 0 ? s->lit_prev : n == 1 ? s->lit_last + 1 : n - 2;
+                n = n > 1 ? n - 2 :
+                    n ? (s->lit_last + 1) % s->lit_num :
+                    s->lit_prev;
                 s->lit_prev = s->lit_last;
                 s->lit_last = s->lit_type;
                 s->lit_type = n;
@@ -988,7 +992,9 @@ local unsigned metablock(state_t *s)
             if (s->dist_left == 0) {
                 /* change to a new distance type */
                 n = decode(s, &s->dist_types);
-                n = n == 0 ? s->dist_prev : n == 1 ? s->dist_last + 1 : n - 2;
+                n = n > 1 ? n - 2 :
+                    n ? (s->dist_last + 1) % s->dist_num :
+                    s->dist_prev;
                 s->dist_prev = s->dist_last;
                 s->dist_last = s->dist_type;
                 s->dist_type = n;
