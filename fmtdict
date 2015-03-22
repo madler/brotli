@@ -5,10 +5,10 @@
 # (This leaves a hanging comma at the end, but C is okay with that.)
 
 PER = 12
-IND = 4
+IND = 0
 
 num = 0
-puts " "*IND + "const unsigned char brotli_dict[] = {"
+puts " "*IND + "unsigned char const dict[] = {"
 ARGF.each_byte do |byte|
     print " "*IND, "    " if num == 0
     printf "0x%02x,", byte
