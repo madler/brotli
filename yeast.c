@@ -965,8 +965,8 @@ local unsigned metablock(state_t *s)
             }
             s->lit_left--;
             if (s->lit_codes > 1) {
-                p1 = s->got ? s->dest[s->got - 1] : 0;      /* %% 0?? */
-                p2 = s->got > 1 ? s->dest[s->got - 2] : 0;  /* %% 0?? */
+                p1 = s->got ? s->dest[s->got - 1] : 0;
+                p2 = s->got > 1 ? s->dest[s->got - 2] : 0;
                 n = context_id(p1, p2, s->mode[s->lit_type]);
                 n = s->lit_map[(s->lit_type << 6) + n];
                 assert(n < s->lit_codes);
