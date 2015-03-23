@@ -94,9 +94,10 @@ typedef struct {
     unsigned short wbits;           /* log2(16 + sliding window size) */
     uint32_t wsize;                 /* sliding window size in bytes */
 
-    /* output state */
+    /* output/compare state */
     unsigned char *dest;            /* allocated output space */
     size_t got;                     /* bytes written to output so far */
+    size_t have;                    /* bytes at dest to compare, or zero */
 
     /* codes types state */
     unsigned short lit_num;         /* number of literal types */
@@ -775,6 +776,164 @@ local size_t distance(state_t *s, unsigned sym, size_t max)
     return dist;
 }
 
+/* Elementary transform function type.  These transform the input
+   word[0..len-1] and put the result at *dest.  The omit functions take the
+   omit parameter as the number of bytes to omit from the front or the back.
+   Otherwise omit must be zero. */
+typedef size_t (*xelem_t)(unsigned char *dest, unsigned char const *word,
+                          size_t len, unsigned omit);
+
+/* Elementary transforms. */
+local size_t identity(unsigned char *dest, unsigned char const *word,
+                      size_t len, unsigned omit)
+{
+    assert(omit == 0);
+    memcpy(dest, word, len);
+    return len;
+}
+
+/* Convert one UTF-8 character at *word to uppercase, per the brotli spec,
+   copying to *dest.  Do not use more than len bytes from *word. */
+#define UPPER() \
+    do { \
+        unsigned ch = *word++; \
+        len--; \
+        if (ch < 192) \
+            *dest++ = ch ^ (ch >= 97 && ch <= 122 ? 32 : 0); \
+        else { \
+            *dest++ = ch; \
+            if (len == 0) break; \
+            if (ch < 224) \
+                *dest++ = *word++ ^ 32; \
+            else { \
+                *dest++ = *word++; \
+                if (--len == 0) break; \
+                *dest++ = *word++ ^ 5; \
+            } \
+            len--; \
+        } \
+    } while (0)
+
+local size_t uppercasefirst(unsigned char *dest, unsigned char const *word,
+                            size_t len, unsigned omit)
+{
+    size_t n;
+
+    assert(omit == 0);
+    if (len == 0)
+        return 0;
+    n = len;
+    UPPER();
+    memcpy(dest, word, len);
+    return n;
+}
+
+local size_t uppercaseall(unsigned char *dest, unsigned char const *word,
+                          size_t len, unsigned omit)
+{
+    size_t n;
+
+    assert(omit == 0);
+    if (len == 0)
+        return 0;
+    n = len;
+    do {
+        UPPER();
+    } while (len);
+    return n;
+}
+
+local size_t omitfirst(unsigned char *dest, unsigned char const *word,
+                       size_t len, unsigned omit)
+{
+    assert(omit > 0);
+    if (len <= omit)
+        return 0;
+    word += omit;
+    len -= omit;
+    memcpy(dest, word, len);
+    return len;
+}
+
+local size_t omitlast(unsigned char *dest, unsigned char const *word,
+                      size_t len, unsigned omit)
+{
+    assert(omit > 0);
+    if (len <= omit)
+        return 0;
+    len -= omit;
+    memcpy(dest, word, len);
+    return len;
+}
+
+/* Transform description. */
+typedef struct {
+    char *prefix;           /* prefix string */
+    xelem_t xelem;          /* elementary transformation function */
+    unsigned omit;          /* count for omit functions */
+    char *suffix;           /* suffix string */
+} xform_t;
+
+/* Transform descriptions, xform_t xforms[121]. */
+#include "xforms.h"
+
+/* Number of possible transforms (should be 121). */
+#define NTRANSFORMS (sizeof(xforms) / sizeof(xform_t))
+
+/* Brotli static dictionary: unsigned char dict[122784]. */
+#include "dict.h"
+
+/* Maximum length of transformed word from dictionary, where the maximum prefix
+   length is 5, the maximum dictionary word length is 24, and the maxium suffix
+   length is 8. */
+#define XMAX (5+24+8)
+
+/*
+ * Get and transform a static dictionary word and put the result in
+ * dest[0..XMAX-1].  copy is the length, and id is the excess distance. The
+ * number of bytes written to dest is returned.
+ */
+local size_t dict_word(unsigned char *dest, size_t copy, size_t id)
+{
+    size_t index, xform, got;
+    uint32_t const doffset[] = {                        /* DOFFSET */
+        0, 0, 0, 0, 0, 4096, 9216, 21504, 35840, 44032, 53248, 63488, 74752,
+        87040, 93696, 100864, 104704, 106752, 108928, 113536, 115968, 118528,
+        119872, 121280, 122016
+    };
+    unsigned char const ndbits[] = {                    /* NDBITS */
+        0, 0, 0, 0, 10, 10, 11, 11, 10, 10, 10, 10, 10, 9, 9, 8, 7, 7, 8, 7, 7,
+        6, 6, 5, 5
+    };
+
+    if (copy > 24)
+        throw(3, "static dictionary word length > 24");
+    if (copy < 4)               /* %% should this be allowed? */
+        throw(3, "static dictionary word length < 4");
+
+    /* point to dictionary word and transform description */
+    index = id & (((size_t)1 << ndbits[copy]) - 1);
+    xform = id >> ndbits[copy];
+    if (xform >= NTRANSFORMS)
+        throw(3, "static dictionary transform out of range");
+    index = doffset[copy] + index * copy;
+
+    /* prefix */
+    got = identity(dest, (unsigned char *)xforms[xform].prefix,
+                   strlen(xforms[xform].prefix), 0);
+
+    /* transform word from dictionary */
+    got += xforms[xform].xelem(dest + got, dict + index, copy,
+                               xforms[xform].omit);
+
+    /* suffix */
+    got += identity(dest + got, (unsigned char *)xforms[xform].suffix,
+                    strlen(xforms[xform].suffix), 0);
+
+    /* return bytes written to dest */
+    return got;
+}
+
 /*
  * Decompress one meta-block.  Return true if this is the last meta-block.
  */
@@ -789,7 +948,8 @@ local unsigned metablock(state_t *s)
     size_t dist;                /* copy distance */
     size_t max;                 /* maximum distance within sliding window */
     unsigned p1, p2;            /* last and second-to-last output bytes */
-    unsigned n;
+    unsigned n;                 /* general counter */
+    unsigned char word[XMAX];   /* transformed word from static dictionary */
 
     /* read and process the meta-block header */
 
@@ -812,7 +972,14 @@ local unsigned metablock(state_t *s)
             throw(3, "more meta-block length nybbles than needed");
     }
     trace("%zu byte%s to uncompress", PLURAL(mlen));
-    s->dest = alloc(s->dest, s->got + mlen);
+    if (s->got + mlen < s->got)
+        throw(1, "output too large for size_t");
+    if (s->have || (s->got == 0 && s->dest != NULL)) {
+        if (s->got + mlen > s->have)
+            throw(4, "compare mismatch: result larger than %zu", s->have);
+    }
+    else
+        s->dest = alloc(s->dest, s->got + mlen);
 
     /* check for and process uncompressed data */
     if (!last && bits(s, 1)) {                          /* ISUNCOMPRESSED */
@@ -827,7 +994,12 @@ local unsigned metablock(state_t *s)
             throw(2, "premature end of input");
 
         /* write uncompressed data */
-        memcpy(s->dest + s->got, s->next, mlen);
+        if (s->have) {
+            if (memcmp(s->dest + s->got, s->next, mlen))
+                throw(4, "compare mismatch");
+        }
+        else
+            memcpy(s->dest + s->got, s->next, mlen);
         s->got += mlen;
         s->next += mlen;
         s->len -= mlen;
@@ -973,7 +1145,12 @@ local unsigned metablock(state_t *s)
             }
             else
                 n = 0;
-            s->dest[s->got++] = decode(s, s->lit_code + n);
+            if (s->have) {
+                if (s->dest[s->got++] != decode(s, s->lit_code + n))
+                    throw(4, "compare mismatch");
+            }
+            else
+                s->dest[s->got++] = decode(s, s->lit_code + n);
             insert--;
         }
 
@@ -1010,25 +1187,41 @@ local unsigned metablock(state_t *s)
             else
                 n = 0;
             dist = distance(s, decode(s, s->dist_code + n), max);
-            trace("copy %zu byte%s from distance %zu", PLURAL(copy), dist);
         }
 
         /* copy */
-        if (copy > mlen)
-            throw(3, "mlen exceeded by copy length");
-        mlen -= copy;
         if (dist > max) {
             /* dictionary copy */
-            trace("dictionary copy");
-            s->got += copy;     /* %% for now */
+            copy = dict_word(word, copy, dist - max - 1);
+            trace("copy %zu bytes from static dictionary", copy);
+            if (copy > mlen)
+                throw(3, "mlen exceeded by dictionary word length");
+            if (s->have) {
+                if (memcmp(s->dest + s->got, word, copy))
+                    throw(4, "compare mismatch");
+            }
+            else
+                memcpy(s->dest + s->got, word, copy);
+            s->got += copy;
+            mlen -= copy;
         }
         else {
+            /* copy from previously decompressed data */
+            trace("copy %zu bytes from distance %zu", copy, dist);
+            if (copy > mlen)
+                throw(3, "mlen exceeded by copy length");
+            mlen -= copy;
             do {
-                s->dest[s->got] = s->dest[s->got - dist];
+                if (s->have) {
+                    if (s->dest[s->got] != s->dest[s->got - dist])
+                        throw(3, "compare mismatch");
+                }
+                else
+                    s->dest[s->got] = s->dest[s->got - dist];
                 s->got++;
             } while (--copy);
         }
-   } while (mlen);
+    } while (mlen);
 
     /* return true if this is the last meta-block */
     return last;
@@ -1050,6 +1243,7 @@ local state_t *new_state(void const *comp, size_t len)
     s->left = 0;
     s->dest = NULL;
     s->got = 0;
+    s->have = 0;
     s->ring[0] = 16;
     s->ring[1] = 15;
     s->ring[2] = 11;
@@ -1066,7 +1260,8 @@ local state_t *new_state(void const *comp, size_t len)
  */
 local void free_state(state_t *s)
 {
-    free(s->dest);
+    if (!s->have)
+        free(s->dest);
     free(s->lit_code);
     free(s->iac_code);
     free(s->dist_code);
@@ -1076,7 +1271,7 @@ local void free_state(state_t *s)
 /*
  * Decompress.  See yeast.h for description.
  */
-int yeast(void const *source, size_t *len, void **dest, size_t *got)
+int yeast(void **dest, size_t *got, void const *source, size_t *len, int cmp)
 {
     state_t *s = NULL;
     ball_t err;
@@ -1084,6 +1279,10 @@ int yeast(void const *source, size_t *len, void **dest, size_t *got)
     try {
         /* initialize the decoding state */
         s = new_state(source, *len);
+        if (cmp) {
+            s->dest = *got ? *dest : got;
+            s->have = *got;
+        }
     }
     preserve {
         /* get the sliding window size */

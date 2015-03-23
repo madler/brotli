@@ -137,7 +137,7 @@ int main(int argc, char **argv)
             }
             fputs(*argv, stderr);
             fputs(":\n", stderr);
-            ret = yeast(source, &len, &dest, &got);
+            ret = yeast(&dest, &got, source, &len, 0);
             fprintf(stderr, "uncompressed length = %zu\n", got);
             if (ret)
                 fprintf(stderr, "yeast() returned %d\n", ret);
@@ -156,7 +156,7 @@ int main(int argc, char **argv)
                   stderr);
             return 1;
         }
-        ret = yeast(source, &len, &dest, &got);
+        ret = yeast(&dest, &got, source, &len, 0);
         fprintf(stderr, "uncompressed length = %zu\n", got);
         if (ret)
             fprintf(stderr, "yeast() returned %d\n", ret);
