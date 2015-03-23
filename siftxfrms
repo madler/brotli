@@ -1,0 +1,21 @@
+#!/usr/bin/ruby -w
+#
+# Extract the transforms from the Brotli specification to stdout as a C array.
+# This assumes that each transform is on its own line in the form id (decimal
+# number), string in quote (potentially with escapes), a word indicating the
+# transform, and another string.  There should be 121 transforms, numbered from
+# 0 to 120.
+
+require 'open-uri'
+spec = "https://tools.ietf.org/html/draft-alakuijala-brotli-02"
+n = 0
+puts "xform_t const xforms[] = {"
+open(spec).each do |line|
+    if line =~ /^\s*(\d+)\s+("(\\.|[^"])*")\s+([A-Za-z]+)(\d*)\s+("(\\.|[^"])*")\s*$/
+        $stderr.puts "out of sequence" if $1.to_i != n
+        printf "    /* %3d */ {%10s, %-15s %d, %s},\n", $1.to_i, $2, $4.downcase + ",", $5.to_i, $6
+        n += 1
+    end
+end
+puts "};"
+$stderr.puts "expected 121" if n != 121
