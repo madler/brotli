@@ -101,19 +101,16 @@ typedef struct {
 
     /* codes types state */
     unsigned short lit_num;         /* number of literal types */
-    unsigned short lit_prev;        /* literal type before the last one */
-    unsigned short lit_last;        /* literal type before this one */
-    unsigned short lit_type;        /* literal type currently in use */
+    unsigned char lit_last;         /* literal type before this one */
+    unsigned char lit_type;         /* literal type currently in use */
     size_t lit_left;                /* number of literals left of this type */
     unsigned short iac_num;         /* number of insert types */
-    unsigned short iac_prev;        /* insert type before the last one */
-    unsigned short iac_last;        /* insert type before this one */
-    unsigned short iac_type;        /* insert type currently in use */
+    unsigned char iac_last;         /* insert type before this one */
+    unsigned char iac_type;         /* insert type currently in use */
     size_t iac_left;                /* number of inserts left of this type */
     unsigned short dist_num;        /* number of distance types */
-    unsigned short dist_prev;       /* distance type before the last one */
-    unsigned short dist_last;       /* distance type before this one */
-    unsigned short dist_type;       /* distance type currently in use */
+    unsigned char dist_last;        /* distance type before this one */
+    unsigned char dist_type;        /* distance type currently in use */
     size_t dist_left;               /* number of distances left of this type */
 
     /* distance code decoding */
@@ -230,8 +227,10 @@ local unsigned decode(state_t *s, prefix_t const *p)
  * - The brotli format permits codes with a single symbol whose code is zero
  *   bits.  construct() is not called in that case, nor is it called for the
  *   other simple prefix codes since the symbols are provided differently in
- *   that descriptor.  For those, simple() is called instead.  construct() is
- *   only called with complete codes that have at least two symbols.
+ *   that descriptor.  For those, simple() is called instead, or in the case of
+ *   a code length code with a single symbol, the code is constructed directly.
+ *   construct() is only called with complete codes that have at least two
+ *   symbols.
  *
  * - The brotli format limits the lengths of codes to 15 bits.
  */
@@ -340,6 +339,11 @@ local void simple(prefix_t *p, unsigned short const *syms, unsigned type)
 /*
  * Read in a prefix code description and save the tables in p.  num is the
  * maximum number of symbols in the alphabet.
+ *
+ * Format note:
+ * - A complex code length code with a single non-zero code length is
+ *   permitted.  That length must be 1, and is interpreted as an actual code
+ *   length of zero bits to code the single symbol that had length 1.
  */
 local void prefix(state_t *s, prefix_t *p, unsigned num)
 {
@@ -398,28 +402,33 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         unsigned short const order[] = {
             1, 2, 3, 4, 0, 5, 17, 6, 16, 7, 8, 9, 10, 11, 12, 13, 14, 15
         };
+#       define ORD (sizeof(order) / sizeof(unsigned short))
 
         /* initially the code for code length code lengths, then reused for
            the code lengths code */
         prefix_t code = {{0, 0, 3, 1, 2}, {0, 3, 4, 2, 1, 5}};
 
         /* lengths read for the code lengths code, then reused for the code */
-        unsigned char lens[num < 18 ? 18 : num];
+        unsigned char lens[num < ORD ? ORD : num];
 
-        trace("  complex prefix code");
+        trace("  complex prefix code (skip %u)", hskip);
 
         /* read the code length code lengths using the fixed code length code
            lengths code above, and make the code length code for reading the
            code lengths (seriously) */
         left = 1 << 5;
         nsym = 0;
+        rep = 0;                        /* count of non-zero lengths */
         while (nsym < hskip)
             lens[order[nsym++]] = 0;
-        while (nsym < 18) {
+        while (nsym < ORD) {
             len = decode(s, &code);
-            trace("  (%u,%u)", order[nsym], len);
-            lens[order[nsym++]] = len;
+            n = order[nsym++];
+            trace("  (%u,%u)", n, len);
+            lens[n] = len;
             if (len) {
+                rep++;
+                last = n;               /* last non-zero length symbol */
                 left -= (1 << 5) >> len;
                 if (left <= 0)
                     break;
@@ -427,11 +436,16 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         }
         if (left < 0)
             throw(3, "oversubscribed code length code");
-        if (left)
+        if (left && (rep != 1 || left != (1 << 4)))
             throw(3, "incomplete code length code");
-        while (nsym < 18)
+        while (nsym < ORD)
             lens[order[nsym++]] = 0;
-        construct(&code, lens, 18);
+        if (left) {                     /* special case for one symbol */
+            code.symbol[0] = last;
+            code.count[0] = 1;
+        }
+        else
+            construct(&code, lens, nsym);
 
         /* read the code lengths */
         left = (int32_t)1 << MAXBITS;
@@ -492,6 +506,7 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
 
         /* make the code */
         construct(p, lens, nsym);
+#       undef ORD
     }
 
 #ifdef DEBUG
@@ -955,10 +970,11 @@ local unsigned metablock(state_t *s)
 
     /* get last marker, and check for empty block if last */
     last = bits(s, 1);                                  /* ISLAST */
+    trace("%smeta-block", last ? "last " : "");
     if (last) {
-        trace("last meta-block");
         if (bits(s, 1)) {                               /* ISEMPTY */
             trace("empty meta-block");
+            trace("end of last meta-block");
             return last;
         }
     }
@@ -1006,11 +1022,11 @@ local unsigned metablock(state_t *s)
         trace("stored block");
 
         /* return false (this isn't the last meta-block) */
+        trace("end of meta-block");
         return last;
     }
 
     /* get the literal type and count codes */
-    s->lit_prev = 0;
     s->lit_last = 1;
     s->lit_type = 0;
     s->lit_num = block_types(s);                        /* NBLTYPESL */
@@ -1025,7 +1041,6 @@ local unsigned metablock(state_t *s)
         s->lit_left = (size_t)0 - 1;
 
     /* get the insert and copy type and count codes */
-    s->iac_prev = 0;
     s->iac_last = 1;
     s->iac_type = 0;
     s->iac_num = block_types(s);                        /* NBLTYPESI */
@@ -1040,7 +1055,6 @@ local unsigned metablock(state_t *s)
         s->iac_left = (size_t)0 - 1;
 
     /* get the distance type and count codes */
-    s->dist_prev = 0;
     s->dist_last = 1;
     s->dist_type = 0;
     s->dist_num = block_types(s);                       /* NBLTYPESD */
@@ -1104,12 +1118,13 @@ local unsigned metablock(state_t *s)
             /* change to a new insert and copy type */
             n = decode(s, &s->iac_types);
             n = n > 1 ? n - 2 :
-                n ? (s->iac_last + 1) % s->iac_num :
-                s->iac_prev;
-            s->iac_prev = s->iac_last;
+                n ? (s->iac_type + 1) % s->iac_num :
+                s->iac_last;
             s->iac_last = s->iac_type;
             s->iac_type = n;
             s->iac_left = block_length(s, &s->iac_count);
+            trace("change to iac type %u (%zu)",
+                  s->iac_type, s->iac_left);
             assert(s->iac_left > 0);
         }
         s->iac_left--;
@@ -1127,12 +1142,13 @@ local unsigned metablock(state_t *s)
                 /* change to a new literal type */
                 n = decode(s, &s->lit_types);
                 n = n > 1 ? n - 2 :
-                    n ? (s->lit_last + 1) % s->lit_num :
-                    s->lit_prev;
-                s->lit_prev = s->lit_last;
+                    n ? (s->lit_type + 1) % s->lit_num :
+                    s->lit_last;
                 s->lit_last = s->lit_type;
                 s->lit_type = n;
                 s->lit_left = block_length(s, &s->lit_count);
+                trace("change to literal type %u (%zu)",
+                      s->lit_type, s->lit_left);
                 assert(s->lit_left > 0);
             }
             s->lit_left--;
@@ -1145,12 +1161,13 @@ local unsigned metablock(state_t *s)
             }
             else
                 n = 0;
+            n = decode(s, s->lit_code + n);
             if (s->have) {
-                if (s->dest[s->got++] != decode(s, s->lit_code + n))
+                if (s->dest[s->got++] != n)
                     throw(4, "compare mismatch");
             }
             else
-                s->dest[s->got++] = decode(s, s->lit_code + n);
+                s->dest[s->got++] = n;
             insert--;
         }
 
@@ -1170,12 +1187,13 @@ local unsigned metablock(state_t *s)
                 /* change to a new distance type */
                 n = decode(s, &s->dist_types);
                 n = n > 1 ? n - 2 :
-                    n ? (s->dist_last + 1) % s->dist_num :
-                    s->dist_prev;
-                s->dist_prev = s->dist_last;
+                    n ? (s->dist_type + 1) % s->dist_num :
+                    s->dist_last;
                 s->dist_last = s->dist_type;
                 s->dist_type = n;
                 s->dist_left = block_length(s, &s->dist_count);
+                trace("change to distance type %u (%zu)",
+                      s->dist_type, s->dist_left);
                 assert(s->dist_left > 0);
             }
             s->dist_left--;
@@ -1214,7 +1232,7 @@ local unsigned metablock(state_t *s)
             do {
                 if (s->have) {
                     if (s->dest[s->got] != s->dest[s->got - dist])
-                        throw(3, "compare mismatch");
+                        throw(4, "compare mismatch");
                 }
                 else
                     s->dest[s->got] = s->dest[s->got - dist];
@@ -1224,6 +1242,7 @@ local unsigned metablock(state_t *s)
     } while (mlen);
 
     /* return true if this is the last meta-block */
+    trace("end of %smeta-block", last ? "last " : "");
     return last;
 }
 
@@ -1256,12 +1275,11 @@ local state_t *new_state(void const *comp, size_t len)
 }
 
 /*
- * Release the resources used by the brotli decoder state.
+ * Release the resources used by the brotli decoder state, except for s->dest
+ * which is returned to the user by yeast().
  */
 local void free_state(state_t *s)
 {
-    if (!s->have)
-        free(s->dest);
     free(s->lit_code);
     free(s->iac_code);
     free(s->dist_code);
@@ -1297,9 +1315,9 @@ int yeast(void **dest, size_t *got, void const *source, size_t *len, int cmp)
     }
     always {
         *len -= s->len;
-        *dest = s->dest;
+        if (!cmp)
+            *dest = s->dest;
         *got = s->got;
-        s->dest = NULL;
         free_state(s);
     }
     catch (err) {
