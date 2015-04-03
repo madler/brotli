@@ -34,6 +34,7 @@ int main(void)
         if (len > maxs)
             maxs = len;
     }
-    printf("%zu transforms: max prefix = %zu, max suffix = %zu\n", n, maxp, maxs);
+    printf("%zu transforms: max prefix = %zu, max suffix = %zu\n",
+           n, maxp, maxs);
     return 0;
 }
