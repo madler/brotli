@@ -76,16 +76,16 @@ static int load(FILE *in, unsigned char **dat, size_t *len, size_t limit)
     return 0;
 }
 
-#define SUFFIX ".compressed"
+#define SUFFIX1 ".compressed"
+#define SUFFIX2 ".bro"
 #define OUT ".out"
 
-/* Write the decompressed output to a derived file name with extension ".out". */
+/* Write decompressed output to a derived file name with extension ".out". */
 static void deliver(char *in, void *data, size_t len)
 {
     char *out;
     FILE *file;
-    size_t inlen;
-    ssize_t prefix;
+    size_t inlen, suf;
 
     inlen = strlen(in);
     out = malloc(inlen + strlen(OUT) + 1);
@@ -93,10 +93,16 @@ static void deliver(char *in, void *data, size_t len)
         fprintf(stderr, "out of memory");
         return;
     }
-    prefix = inlen - strlen(SUFFIX);
-    prefix = prefix < 0 || strcmp(in + prefix, SUFFIX) ? inlen : prefix;
-    memcpy(out, in, prefix);
-    strcpy(out + prefix, OUT);
+    suf = strlen(SUFFIX1);
+    if (inlen >= suf && strcmp(in + inlen - suf, SUFFIX1) == 0)
+        inlen -= suf;
+    else {
+        suf = strlen(SUFFIX2);
+        if (inlen >= suf && strcmp(in + inlen - suf, SUFFIX2) == 0)
+            inlen -= suf;
+    }
+    memcpy(out, in, inlen);
+    strcpy(out + inlen, OUT);
     file = fopen(out, "wb");
     if (file == NULL) {
         fprintf(stderr, "could not create %s", out);
@@ -118,6 +124,25 @@ int main(int argc, char **argv)
     void *dest;
     size_t len, got;
 
+#ifdef DEBUG
+    /* process verbosity option */
+    if (argc > 1 && argv[1][0] == '-') {
+        char *opt;
+
+        --argc;
+        opt = *++argv;
+        while (*++opt) {
+            if (*opt == 'v')
+                yeast_verbosity++;
+            else {
+                fprintf(stderr, "deb: invalid option %s\n", opt);
+                return 1;
+            }
+        }
+    }
+#endif
+
+    /* decompress each file on the remaining command line */
     if (--argc) {
         for (;;) {
             in = fopen(*++argv, "rb");
@@ -149,6 +174,8 @@ int main(int argc, char **argv)
             putc('\n', stderr);
         }
     }
+
+    /* or if no names on the remaining command line, decompress from stdin */
     else {
         ret = load(stdin, &source, &len, 0);
         if (ret) {

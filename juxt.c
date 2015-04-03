@@ -130,8 +130,26 @@ int main(int argc, char **argv)
     void *uncompressed;
     size_t clen, ulen;
 
-    while (--argc) {
-        argv++;
+#ifdef DEBUG
+    /* process verbosity option */
+    if (argc > 1 && argv[1][0] == '-') {
+        char *opt;
+
+        --argc;
+        opt = *++argv;
+        while (*++opt) {
+            if (*opt == 'v')
+                yeast_verbosity++;
+            else {
+                fprintf(stderr, "juxt: invalid option %s\n", opt);
+                return 1;
+            }
+        }
+    }
+#endif
+
+    /* test each name in the command line remaining */
+    while (++argv, --argc) {
         if (strip(*argv, 0)) {
             fprintf(stderr, "%s has no extension\n", *argv);
             continue;

@@ -23,3 +23,10 @@
  * *dest is unchanged.
  */
 int yeast(void **dest, size_t *got, void const *source, size_t *len, int cmp);
+
+/*
+ * Verbosity of trace messages when yeast.c is compiled with #define DEBUG.
+ */
+#ifdef DEBUG
+   extern int yeast_verbosity;
+#endif

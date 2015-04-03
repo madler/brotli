@@ -10,7 +10,6 @@
  * and readable than to be fast.
  *
  * This code is intended to be compliant with the C99 standard and portable.
- *
  */
 
 #include <stdlib.h>
@@ -32,14 +31,17 @@
 /* trace() macro for debugging. */
 #ifdef DEBUG
 #  include <stdio.h>
-#  define trace(...) \
+   int yeast_verbosity = 0;
+#  define trace(level, ...) \
     do { \
-        fputs("yeast: ", stderr); \
-        fprintf(stderr, __VA_ARGS__); \
-        putc('\n', stderr); \
+        if ((level) <= yeast_verbosity) { \
+            fputs("yeast: ", stderr); \
+            fprintf(stderr, __VA_ARGS__); \
+            putc('\n', stderr); \
+        } \
     } while (0)
 #else
-#  define trace(...)
+#  define trace(level, ...)
 #endif
 
 /*
@@ -362,7 +364,7 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         unsigned short syms[4];     /* symbols for this code */
         unsigned n;
 
-        trace("  simple prefix code");
+        trace(4, "  simple prefix code");
 
         /* set abits to the number of bits required to represent num - 1 */
         n = 2;
@@ -411,7 +413,7 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         /* lengths read for the code lengths code, then reused for the code */
         unsigned char lens[num < ORD ? ORD : num];
 
-        trace("  complex prefix code (skip %u)", hskip);
+        trace(4, "  complex prefix code (skip %u)", hskip);
 
         /* read the code length code lengths using the fixed code length code
            lengths code above, and make the code length code for reading the
@@ -424,7 +426,7 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         while (nsym < ORD) {
             len = decode(s, &code);
             n = order[nsym++];
-            trace("  (%u,%u)", n, len);
+            trace(5, "  (%u,%u)", n, len);
             lens[n] = len;
             if (len) {
                 rep++;
@@ -518,12 +520,12 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         for (n = 0; n <= MAXBITS; n++)
             for (k = 0; k < p->count[n]; k++, i++)
                 if (num == 256 && p->symbol[i] >= ' ' && p->symbol[i] <= '~')
-                    trace("  %u: '%s%c'",
+                    trace(5, "  %u: '%s%c'",
                           n, p->symbol[i] == '\'' ||
                              p->symbol[i] == '\\' ? "\\" : "",
                           p->symbol[i]);
                 else
-                    trace("  %u: %u", n, p->symbol[i]);
+                    trace(5, "  %u: %u", n, p->symbol[i]);
     }
 #endif
 }
@@ -599,32 +601,31 @@ local void context_map(state_t *s, unsigned char *map, size_t len,
     if ((size_t)1 << rlemax > len)
         throw(3, "rlemax of %u unnecessarily large for map length",
               rlemax);
-    trace("%srun length code, rlemax = %u (max run %zu)",
+    trace(4, "%srun length code, rlemax = %u (max run %zu)",
           rlemax ? "" : "no ", rlemax, ((size_t)1 << (rlemax + 1)) - 1);
-    trace("context map code (%u+%u):", rlemax, trees);
+    trace(4, "context map code (%u+%u)", rlemax, trees);
     prefix(s, &code, rlemax + trees);
 
     /* read the map, expanding runs of zeros */
-    trace("context map:");
     n = 0;
     do {
         sym = decode(s, &code);
         if (sym == 0) {
             map[n++] = 0;
-            trace("  value 0 (have %u)", n);
+            trace(5, "  value 0 (have %u)", n);
         }
         else if (sym <= rlemax) {
             zeros = ((size_t)1 << sym) + bits(s, sym);
             if (n + zeros > len)
                 throw(3, "run length too long");
-            trace("  %zu 0's (have %zu)", zeros, n + zeros);
+            trace(5, "  %zu 0's (have %zu)", zeros, n + zeros);
             do {
                 map[n++] = 0;
             } while (--zeros);
         }
         else {
             map[n++] = sym - rlemax;
-            trace("  value %u (have %u)", sym - rlemax, n);
+            trace(5, "  value %u (have %u)", sym - rlemax, n);
         }
     } while (n < len);
 
@@ -632,7 +633,7 @@ local void context_map(state_t *s, unsigned char *map, size_t len,
     if (bits(s, 1)) {
         unsigned char table[trees];
 
-        trace("inverse move-to-front");
+        trace(4, "  inverse move-to-front");
         for (n = 0; n < trees; n++)
             table[n] = n;
         for (n = 0; n < len; n++) {
@@ -970,11 +971,11 @@ local unsigned metablock(state_t *s)
 
     /* get last marker, and check for empty block if last */
     last = bits(s, 1);                                  /* ISLAST */
-    trace("%smeta-block", last ? "last " : "");
+    trace(1, "%smeta-block", last ? "last " : "");
     if (last) {
         if (bits(s, 1)) {                               /* ISEMPTY */
-            trace("empty meta-block");
-            trace("end of last meta-block");
+            trace(1, "empty meta-block");
+            trace(1, "end of last meta-block");
             return last;
         }
     }
@@ -987,7 +988,7 @@ local unsigned metablock(state_t *s)
         if ((mlen >> ((n + 3) << 2)) == 0)
             throw(3, "more meta-block length nybbles than needed");
     }
-    trace("%zu byte%s to uncompress", PLURAL(mlen));
+    trace(1, "%zu byte%s to uncompress", PLURAL(mlen));
     if (s->got + mlen < s->got)
         throw(1, "output too large for size_t");
     if (s->have || (s->got == 0 && s->dest != NULL)) {
@@ -1019,10 +1020,10 @@ local unsigned metablock(state_t *s)
         s->got += mlen;
         s->next += mlen;
         s->len -= mlen;
-        trace("stored block");
+        trace(2, "stored block");
 
         /* return false (this isn't the last meta-block) */
-        trace("end of meta-block");
+        trace(1, "end of meta-block");
         return last;
     }
 
@@ -1030,12 +1031,12 @@ local unsigned metablock(state_t *s)
     s->lit_last = 1;
     s->lit_type = 0;
     s->lit_num = block_types(s);                        /* NBLTYPESL */
-    trace("%u literal code type%s", PLURAL(s->lit_num));
+    trace(2, "%u literal code type%s", PLURAL(s->lit_num));
     if (s->lit_num > 1) {
         prefix(s, &s->lit_types, s->lit_num + 2);       /* HTREE_BTYPE_L */
         prefix(s, &s->lit_count, BLOCK_LENGTH_CODES);   /* HTREE_BLEN_L */
         s->lit_left = block_length(s, &s->lit_count);   /* BLEN_L */
-        trace("%zu literal%s of the first type", PLURAL(s->lit_left));
+        trace(2, "%zu literal%s of the first type", PLURAL(s->lit_left));
     }
     else
         s->lit_left = (size_t)0 - 1;
@@ -1044,12 +1045,12 @@ local unsigned metablock(state_t *s)
     s->iac_last = 1;
     s->iac_type = 0;
     s->iac_num = block_types(s);                        /* NBLTYPESI */
-    trace("%u insert code type%s", PLURAL(s->iac_num));
+    trace(2, "%u insert code type%s", PLURAL(s->iac_num));
     if (s->iac_num > 1) {
         prefix(s, &s->iac_types, s->iac_num + 2);       /* HTREE_BTYPE_I */
         prefix(s, &s->iac_count, BLOCK_LENGTH_CODES);   /* HTREE_BLEN_I */
         s->iac_left = block_length(s, &s->iac_count);   /* BLEN_I */
-        trace("%zu insert%s of the first type", PLURAL(s->iac_left));
+        trace(2, "%zu insert%s of the first type", PLURAL(s->iac_left));
     }
     else
         s->iac_left = (size_t)0 - 1;
@@ -1058,12 +1059,12 @@ local unsigned metablock(state_t *s)
     s->dist_last = 1;
     s->dist_type = 0;
     s->dist_num = block_types(s);                       /* NBLTYPESD */
-    trace("%u distance code type%s", PLURAL(s->dist_num));
+    trace(2, "%u distance code type%s", PLURAL(s->dist_num));
     if (s->dist_num > 1) {
         prefix(s, &s->dist_types, s->dist_num + 2);     /* HTREE_BTYPE_D */
         prefix(s, &s->dist_count, BLOCK_LENGTH_CODES);  /* HTREE_BLEN_I */
         s->dist_left = block_length(s, &s->dist_count); /* BLEN_D */
-        trace("%zu distance%s of the first type", PLURAL(s->dist_left));
+        trace(2, "%zu distance%s of the first type", PLURAL(s->dist_left));
     }
     else
         s->dist_left = (size_t)0 - 1;
@@ -1072,44 +1073,45 @@ local unsigned metablock(state_t *s)
     s->postfix = bits(s, 2);                            /* NPOSTFIX */
     s->direct = bits(s, 4) << s->postfix;               /* NDIRECT */
     dists = 16 + s->direct + (48 << s->postfix);
-    trace("%u direct distance codes (%u total)", s->direct, dists);
+    trace(2, "%u direct distance codes (%u total)", s->direct, dists);
 
     /* get the context modes for each literal type */
-    trace("%u literal type context mode%s", PLURAL(s->lit_num));
+    trace(2, "%u literal type context mode%s", PLURAL(s->lit_num));
     for (n = 0; n < s->lit_num; n++)
         s->mode[n] = bits(s, 2);                        /* CMODE */
 
     /* get the number of literal prefix codes and literal context map */
     s->lit_codes = block_types(s);                      /* NTREESL */
-    trace("%u literal code%s", PLURAL(s->lit_codes));
+    trace(2, "%u literal code%s", PLURAL(s->lit_codes));
     if (s->lit_codes > 1)                               /* CMAPL */
         context_map(s, s->lit_map, s->lit_num << 6, s->lit_codes);
 
     /* get the number of distance prefix codes and distance context map */
     s->dist_codes = block_types(s);                     /* NTREESD */
-    trace("%u distance code%s", PLURAL(s->dist_codes));
+    trace(2, "%u distance code%s", PLURAL(s->dist_codes));
     if (s->dist_codes > 1)                              /* CMAPD */
         context_map(s, s->dist_map, s->dist_num << 2, s->dist_codes);
 
     /* get lit_codes literal prefix codes */
-    trace("%u literal prefix code%s:", PLURAL(s->lit_codes));
+    trace(2, "%u literal prefix code%s", PLURAL(s->lit_codes));
     s->lit_code = alloc(NULL, s->lit_codes * sizeof(prefix_t));
     for (n = 0; n < s->lit_codes; n++)
         prefix(s, s->lit_code + n, 256);                /* HTREEL[n] */
 
     /* get iac_num insert and copy prefix codes */
-    trace("%u insert and copy prefix code%s:", PLURAL(s->iac_num));
+    trace(2, "%u insert and copy prefix code%s", PLURAL(s->iac_num));
     s->iac_code = alloc(NULL, s->iac_num * sizeof(prefix_t));
     for (n = 0; n < s->iac_num; n++)
         prefix(s, s->iac_code + n, 704);                /* HTREEI[n] */
 
     /* get dist_codes distance prefix codes */
-    trace("%u distance prefix code%s:", PLURAL(s->dist_codes));
+    trace(2, "%u distance prefix code%s", PLURAL(s->dist_codes));
     s->dist_code = alloc(NULL, s->dist_codes * sizeof(prefix_t));
     for (n = 0; n < s->dist_codes; n++)
         prefix(s, s->dist_code + n, dists);             /* HTREED[n] */
 
     /* done with header */
+    trace(2, "end of meta-block header");
 
     /* decode the meta-block data */
     do {
@@ -1123,7 +1125,7 @@ local unsigned metablock(state_t *s)
             s->iac_last = s->iac_type;
             s->iac_type = n;
             s->iac_left = block_length(s, &s->iac_count);
-            trace("change to iac type %u (%zu)",
+            trace(3, "change to iac type %u (%zu)",
                   s->iac_type, s->iac_left);
             assert(s->iac_left > 0);
         }
@@ -1133,7 +1135,7 @@ local unsigned metablock(state_t *s)
         copy = copy_length(s, iac_sym);
 
         /* insert literals */
-        trace("insert %zu literal%s", PLURAL(insert));
+        trace(3, "insert %zu literal%s", PLURAL(insert));
         if (insert > mlen)
             throw(3, "mlen exceeded by insert length");
         mlen -= insert;
@@ -1147,7 +1149,7 @@ local unsigned metablock(state_t *s)
                 s->lit_last = s->lit_type;
                 s->lit_type = n;
                 s->lit_left = block_length(s, &s->lit_count);
-                trace("change to literal type %u (%zu)",
+                trace(3, "change to literal type %u (%zu)",
                       s->lit_type, s->lit_left);
                 assert(s->lit_left > 0);
             }
@@ -1192,7 +1194,7 @@ local unsigned metablock(state_t *s)
                 s->dist_last = s->dist_type;
                 s->dist_type = n;
                 s->dist_left = block_length(s, &s->dist_count);
-                trace("change to distance type %u (%zu)",
+                trace(3, "change to distance type %u (%zu)",
                       s->dist_type, s->dist_left);
                 assert(s->dist_left > 0);
             }
@@ -1211,7 +1213,7 @@ local unsigned metablock(state_t *s)
         if (dist > max) {
             /* dictionary copy */
             copy = dict_word(word, copy, dist - max - 1);
-            trace("copy %zu bytes from static dictionary", copy);
+            trace(3, "copy %zu bytes from static dictionary", copy);
             if (copy > mlen)
                 throw(3, "mlen exceeded by dictionary word length");
             if (s->have) {
@@ -1225,7 +1227,7 @@ local unsigned metablock(state_t *s)
         }
         else {
             /* copy from previously decompressed data */
-            trace("copy %zu bytes from distance %zu", copy, dist);
+            trace(3, "copy %zu bytes from distance %zu", copy, dist);
             if (copy > mlen)
                 throw(3, "mlen exceeded by copy length");
             mlen -= copy;
@@ -1242,7 +1244,7 @@ local unsigned metablock(state_t *s)
     } while (mlen);
 
     /* return true if this is the last meta-block */
-    trace("end of %smeta-block", last ? "last " : "");
+    trace(1, "end of %smeta-block", last ? "last " : "");
     return last;
 }
 
@@ -1306,22 +1308,24 @@ int yeast(void **dest, size_t *got, void const *source, size_t *len, int cmp)
         /* get the sliding window size */
         s->wbits = bits(s, 1) ? bits(s, 3) + 17 : 16;  /* WBITS */
         s->wsize = ((uint32_t)1 << s->wbits) - 16;
-        trace("window size = %" PRIu32 " (%u bits)", s->wsize, s->wbits);
+        trace(1, "window size = %" PRIu32 " (%u bits)", s->wsize, s->wbits);
 
         /* decompress meta-blocks until last block */
         while (metablock(s) == 0)
             ;
-        trace("%zu(%u) bytes(bits) unused", s->len, s->left);
+        trace(1, "%zu(%u) bytes(bits) unused", s->len, s->left);
     }
     always {
-        *len -= s->len;
-        if (!cmp)
-            *dest = s->dest;
-        *got = s->got;
-        free_state(s);
+        if (s != NULL) {
+            *len -= s->len;
+            if (!cmp)
+                *dest = s->dest;
+            *got = s->got;
+            free_state(s);
+        }
     }
     catch (err) {
-        trace("error: %s -- aborting", err.why);
+        trace(1, "error: %s -- aborting", err.why);
         drop(err);
     }
     return err.code;
