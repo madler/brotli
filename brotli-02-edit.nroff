@@ -7,7 +7,7 @@
 .ds LF Alakuijala & Szabadka 
 .ds RF FORMFEED[Page %]
 .ds LH Internet-Draft
-.ds RH October 2014
+.ds RH April 2015
 .ds CH Brotli
 .ds CF Expires April 27, 2015
 .hy 0
@@ -18,13 +18,13 @@
 .tl 'Network Working Group''J. Alakuijala'
 .tl 'Internet-Draft''Z. Szabadka'
 .tl 'Intended Status: Informational''Google, Inc'
-.tl 'Expires: April 27, 2015''October 2014'
+.tl 'Expires: April 27, 2015''April 2015'
 .fi
 
 
 .ce 2
 Brotli Compressed Data Format 
-draft-alakuijala-brotli-02
+draft-alakuijala-brotli-02-edit
 .fi
 .in 3
 
@@ -57,7 +57,7 @@ This Internet-Draft will expire on April 27, 2015.
 .ti 0
 Copyright Notice
 
-Copyright (c) 2014 IETF Trust and the persons identified as the
+Copyright (c) 2014, 2015 IETF Trust and the persons identified as the
 document authors.  All rights reserved.
 
 This document is subject to BCP 78 and the IETF Trust's Legal
@@ -113,7 +113,7 @@ The data format defined by this specification does not attempt to:
 1.2. Intended audience
 
 This specification is intended for use by software implementers
-to compress data into and/or decompress data from "brotli" format.
+to compress data into and/or decompress data from the brotli format.
 
 The text of the specification assumes a basic background in
 programming at the level of bits and other primitive data
@@ -205,10 +205,10 @@ compressed byte sequence:
    * Data elements are packed into bytes in order of
      increasing bit number within the byte, i.e., starting
      with the least-significant bit of the byte.
-   * Data elements other than Huffman codes are packed
+   * Data elements other than prefix codes are packed
      starting with the least-significant bit of the data
      element.
-   * Huffman codes are packed starting with the most-
+   * Prefix codes are packed starting with the most-
      significant bit of the code.
 .fi
 
@@ -217,7 +217,7 @@ a sequence of bytes, starting with the first byte at the
 *right* margin and proceeding to the *left*, with the most-
 significant bit of each byte on the left as usual, one would be
 able to parse the result from right to left, with fixed-width
-elements in the correct MSB-to-LSB order and Huffman codes in
+elements in the correct MSB-to-LSB order and prefix codes in
 bit-reversed order (i.e., with the first bit of the code in the
 relative LSB position).
 
@@ -225,20 +225,26 @@ relative LSB position).
 2. Compressed representation overview
 
 A compressed data set consists of a header and a series of meta-
-blocks corresponding to successive meta-blocks of input data. The
-meta-block sizes are limited to bytes and the maximum meta-block size
-is 268,435,456 bytes.
+blocks. Each meta-block decompresses to a sequence of 1
+to 268,435,456 (256 MiB) uncompressed bytes.  The final uncompressed data is
+the concatenation of the uncompressed sequences from each meta-block.
 
-The header contains the size of a sliding window on the input data
-that is sufficient to keep on the intermediate storage at any given
-point during decoding the stream.
+The header contains the size of the sliding window that was used during compression.
+The decompressor must retain at least that amount of uncompressed data prior to the
+current position in the stream, in order to be able to decompress
+what follows.  The sliding window size is a power of two, minus 16, where
+the power is in the range of 16 to 24.  The possible sliding window
+sizes range from 64 KiB - 16 B to 16 MiB - 16 B.
 
 Each meta-block is compressed using a combination of the LZ77
-algorithm (Lempel-Ziv 1977, [LZ77]) and Huffman
-coding. The Huffman trees for each meta-block are independent of
+algorithm (Lempel-Ziv 1977, [LZ77]) and Huffman coding.  The
+result of Huffman coding is referred to here as a prefix code.
+The prefix codes for each meta-block are independent of
 those for previous or subsequent meta-blocks; the LZ77 algorithm may
 use a reference to a duplicated string occurring in a previous
-meta-block, up to sliding window size input bytes before.
+meta-block, up to the sliding window size input bytes before.
+In the brotli format, a string reference may instead refer to a static
+dictionary entry.
 
 Each meta-block consists of two parts: a meta-block header that
 describes the representation of the compressed data part, and a
@@ -246,40 +252,48 @@ compressed data part. The compressed data consists of a series of
 commands. Each command consists of two parts: a sequence of literal
 bytes (of strings that have not been detected as duplicated within
 the sliding window), and a pointer to a duplicated string,
-represented as a pair <length, backward distance>.
+represented as a pair <length, backward distance>.  There can be
+zero literal bytes in the command.  The minimum length of the string to be
+duplicated is two, but the last command in the meta-block is permitted to have
+only literals and no pointer to a string to duplicate.
 
 Each command in the compressed data is represented using three kinds
-of Huffman codes: one kind of code tree for the literal sequence
+of prefix codes: one set of prefix codes are for the literal sequence
 lengths (also referred to as literal insertion lengths) and backward
 copy lengths (that is, a single code word represents two lengths,
 one of the literal sequence and one of the backward copy), a separate
-kind of code tree for literals, and a third kind of code tree for
-distances. The code trees for each meta-block appear in a compact
+set of prefix codes are for literals, and a third set of prefix codes are for
+distances. The prefix code descriptions for each meta-block appear in a compact
 form just before the compressed data in the meta-block header.
 
-The sequence of each category of value in the representation of a
-command (insert-and-copy lengths, literals and distances) within a meta-
-block is further divided into blocks. In the "brotli" format, blocks
-are not contiguous chunks of compressed data, but rather the pieces
-of compressed data belonging to a block are interleaved with pieces
-of data belonging to other blocks. Each meta-block can be logically
-decomposed into a series of insert-and-copy length blocks, a series
-of literal blocks and a series of distance blocks. These are also
-called the three block categories: a meta-block has a series of
-blocks for each block category. Note that the physical structure of
-the meta-block is a series of commands, while the three series of
-blocks is the logical structure.
+There can be more than one prefix code for each category, where the
+prefix code to use for the next element of that category is determined
+by the context of the compressed stream that precedes that element.
+Part of that context is three current block types, one for each
+category.  A block type is in the range of 0..255.  For each category
+there is a count of how many elements of that category remain to be
+decoded using the current block type.  Once that count is expended,
+a new block type and block count is read from the stream immediately
+preceding the next element of that category, which will use the new
+block type.
 
-A block is defined by a type (0-255) and a length. The length is the
-amount of huffman symbols of its category, the type dictates which
-huffman code is used for these symbols. Consider the following
+The insert and copy block type directly determines which prefix code to
+use for the next insert and copy element. For the literal and distance
+elements, the respective block type is used in combination with other
+context information to determine which prefix code to use for the next
+element.
+
+Consider the following
 example:
 
    (IaC0, L0, L1, L2, D0)(IaC1, D1)(IaC2, L3, L4, D2)(IaC3, L5, D3)
 
-The meta-block here has 4 commands, and each of the three categories of
-symbols within these commands are part of a logical block structure,
-for example the following:
+The meta-block here has four commands, contained in parentheses for clarity,
+where each of the three categories of
+symbols within these commands can be interpreted using different block types.
+Here we separate out each category as its own sequence to show an example of block
+types assigned to those elements.  Each square-bracketed group is a block that
+uses the same block type:
 
    [IaC0, IaC1][IaC2, IaC3]  <-- insert-and-copy: block types 0 and 1
 
@@ -288,55 +302,85 @@ for example the following:
    [D0][D1, D2, D3]          <-- distances: block types 0 and 1
 
 The subsequent blocks within each block category must have different
-block types, but blocks further away in the block sequence can have
-the same types. The block types are numbered from 0 to the maximum
+block types, but we see that blocks further away in the block sequence can reuse
+previous types. The block types are numbered from 0 to the maximum
 block type number of 255 and the first block of each block category
-must have type 0. The block structure of a meta-block is represented
+must be type 0. The block structure of a meta-block is represented
 by the sequence of block-switch commands for each block category,
-where a block-switch command is a pair <block type, block length>.
+where a block-switch command is a pair <block type, block count>.
 The block-switch commands are represented in the compressed data
-before the start of each new block using a Huffman code tree for
-block types and a separate Huffman code tree for block lengths for
-each block category. In the above example the physical layout of the
-meta-block is the following:
+before the start of each new block using a prefix code for
+block types and a separate prefix code for block counts for
+each block category. For the above example the physical layout of the
+meta-block is then:
 
-   IaC0 L0 L1 LBlockSwitch(1, 3) L2 D0 IaC1 DBlockSwitch(1, 1) D1
-   IaCBlockSwitch(1, 2) IaC2 L3 L4 D2 IaC3 LBlockSwitch(0, 1) D3
+   IaC0 L0 L1 LBlockSwitch(1, 3) L2 D0 IaC1 DBlockSwitch(1, 3) D1
+   IaCBlockSwitch(1, 2) IaC2 L3 L4 D2 IaC3 LBlockSwitch(0, 1) L5 D3
 
-Note that the block switch commands for the first blocks are not part
-of the meta-block compressed data part, they are encoded in the meta-
-block header. The code trees for block types and lengths (total of
-six Huffman code trees) appear in a compact form in the meta-block
+where *BlockSwitch(t, n) switches to block type t for a count of n elements.
+Note that in this example DBlockSwitch(1, 3) immediately precedes the
+next required distance D1.  It does not follow the last distance of
+the previous block, D0.  Whenever an element of a category is needed,
+and the block count for that category has reached zero, then a new
+block type and count is read from the stream just before reading that next
+element.
+
+The block switch commands for the first blocks of each category are not part
+of the meta-block compressed data. Instead the first block type
+is defined to be 0, and the first block count for each category is
+encoded in the meta-block header. The prefix codes for the block types and counts, a total of
+six prefix codes over the three categories, are defined in a compact form in the meta-block
 header.
 
 Each type of value (insert-and-copy lengths, literals and distances)
-can be encoded with any Huffman tree from a collection of Huffman
-trees of the same kind appearing in the meta-block header. The
-particular Huffman tree used can depend on two factors: the block
+can be encoded with any prefix code from a collection of prefix
+codes of the same kind appearing in the meta-block header. The
+particular prefix code used can depend on two factors: the block
 type of the block the value appears in, and the context of the value.
 In the case of the literals, the context is the previous two bytes in
 the input data, and in the case of distances, the context is the copy
 length from the same command. For insert-and-copy lengths, no context
-is used and the Huffman tree depends only on the block type (in fact,
-the index of the Huffman tree is the block type number). In the case
+is used and the prefix code depends only on the block type. In the case
 of literals and distances, the context is mapped to a context ID in
-the rage [0, 63] for literals and [0, 3] for distances and the matrix
-of the Huffman tree indices for each block type and context ID,
+the range 0..63 for literals and 0..3 for distances and the matrix
+of the prefix code indices for each block type and context ID,
 called the context map, is encoded in a compact form in the meta-
 block header.
 
-In addition to the parts listed above (Huffman code trees for insert-
+For example, the prefix code to use to decode L2 depends on the
+block type (1), the literal context ID for block type 1 defined
+in the meta-block header,
+and the two uncompressed bytes that were decoded from L0 and L1.
+Similarly, the prefix code to use to decode D0 depends on the block
+type (0), the distance context ID for block type 0, and the copy
+length decoded from IaC0.  The prefix code to use to decode IaC3
+depends only on the block type (1).
+
+In addition to the parts listed above (prefix code for insert-
 and-copy lengths, literals, distances, block types and block lengths
 and the context map), the meta-block header contains the number of
-input bytes in the meta-block and two additional parameters used in
-the representation of copy distances (number of "postfix bits" and
-number of direct distance codes).
+uncompressed bytes coded in the meta-block and two additional parameters used in
+the representation of copy distances: the number of postfix bits and
+the number of direct distance codes.
+
+A compressed meta-block may be marked in the header as the last meta-block,
+which terminates the compressed stream.
+
+A meta-block may instead simply store the uncompressed data directly as
+bytes on byte boundaries with no coding or matching strings.  In this
+case the meta-block header information only contains the number of
+uncompressed bytes and the indication that the meta-block is uncompressed.
+An uncompressed meta-block cannot be the last meta-block.
+
+A meta-block may also be empty, which generates no uncompressed data at all.
+An empty block can only be the last block, which can be used to mark the end of a
+stream whose last productive meta-block was an uncompressed block.
 
 .ti 0
-3. Compressed representation of Huffman codes
+3. Compressed representation of prefix codes
 
 .ti 0
-3.1. Introduction to prefix and Huffman coding
+3.1. Introduction to prefix coding
 
 Prefix coding represents symbols from an a priori known alphabet
 by bit sequences (codes), one code for each symbol, in a manner
@@ -374,20 +418,20 @@ Given an alphabet with known symbol frequencies, the Huffman
 algorithm allows the construction of an optimal prefix code (one
 which represents strings with those symbol frequencies using the
 fewest bits of any possible prefix codes for that alphabet). Such
-a code is called a Huffman code. (See [HUFFMAN] in Chapter 5,
+a prefix code is called a Huffman code. (See [HUFFMAN] in Chapter 5,
 references for additional information on Huffman codes.)
 
-Note that in the "brotli" format, the Huffman codes for the
+Note that in the brotli format, the prefix codes for the
 various alphabets must not exceed certain maximum code lengths.
 This constraint complicates the algorithm for computing code
 lengths from symbol frequencies. Again, see Chapter 5, references
 for details.
 
 .ti 0
-3.2. Use of Huffman coding in the "brotli" format
+3.2. Use of prefix coding in the brotli format
 
-The Huffman codes used for each alphabet in the "brotli" format
-are canonical Huffman codes, which have two additional rules:
+The prefix codes used for each alphabet in the brotli format
+are canonical prefix codes, which have two additional rules:
 
 .nf
    * All codes of a given bit length have lexicographically
@@ -414,7 +458,7 @@ assuming that the order of the alphabet is ABCD:
 I.e., 0 precedes 10 which precedes 11x, and 110 and 111 are
 lexicographically consecutive.
 
-Given this rule, we can define the canonical Huffman code for an
+Given this rule, we can define the canonical prefix code for an
 alphabet just by giving the bit lengths of the codes for each
 symbol of the alphabet in order; this is sufficient to determine
 the actual codes. In our example, the code is completely defined
@@ -504,28 +548,28 @@ Step 3 produces the following code values:
 .ti 0
 3.3. Alphabet sizes
 
-Huffman codes are used for different purposes in the "brotli"
+Prefix codes are used for different purposes in the brotli
 format, and each purpose has a different alphabet size. For
 literal codes the alphabet size is 256. For insert-and-copy
 length codes the alphabet size is 704. For block length codes,
 the alphabet size is 26. For distance codes, block type codes and
-the Huffman codes used in compressing the context map, the
+the prefix codes used in compressing the context map, the
 alphabet size is dynamic and is based on other parameters.
 
 .ti 0
-3.4. Simple Huffman codes
+3.4. Simple prefix codes
 
 The first two bits of the compressed representation of each
-Huffman code distinguishes between simple and complex Huffman
-codes. If this value is 1, then a simple Huffman code follows.
+prefix code distinguishes between simple and complex prefix
+codes. If this value is 1, then a simple prefix code follows.
 Otherwise the value indicates the number of leading zeros.
 
-A simple Huffman code can have only up to four symbols with non-
-zero code length. The format of the simple Huffman code is as
+A simple prefix code can have only up to four symbols with non-
+zero code length. The format of the simple prefix code is as
 follows:
 
 .nf
-   2 bits: value of 1 indicates a simple Huffman code
+   2 bits: value of 1 indicates a simple prefix code
    2 bits: NSYM - 1, where NSYM = # of symbols with non-zero
            code length
 
@@ -534,12 +578,12 @@ follows:
    1 bit:  tree-select, present only for NSYM = 4
 .fi
 
-The value of ALPHABET_BITS depends on the alphabet of the Huffman
+The value of ALPHABET_BITS depends on the alphabet of the prefix
 code: it is the smallest number of bits that can represent all
 symbols in the alphabet. E.g. for the alphabet of literal bytes,
 ALPHABET_BITS is 8. The value of each of the NSYM symbols above is
 the value of the ALPHABETS_BITS width machine integer representing
-the symbol modulo the alphabet size of the Huffman code.
+the symbol modulo the alphabet size of the prefix code.
 
 The (non-zero) code lengths of the symbols can be reconstructed as
 follows:
@@ -548,16 +592,16 @@ follows:
    * if NSYM = 1, the code length for the one symbol is one at
      this stage, but only to distinguish it from the other zero
      code length symbols, when encoding this symbol in the
-     compressed data stream using this Huffman code later, no
+     compressed data stream using this prefix code later, no
      actual bits are emitted. Similarly, when decoding a symbol
-     using this Huffman code, no bits are read and the one symbol
+     using this prefix code, no bits are read and the one symbol
      is returned.
 
    * if NSYM = 2, both symbols have code length 1.
 
    * if NSYM = 3, the code lengths for the symbols are 1, 2, 2 in
      the order they appear in the representation of the simple
-     Huffman code.
+     prefix code.
 
    * if NSYM = 4, the code lengths (in order of symbols decoded)
      depend on the tree-select bit: 2, 2, 2, 2, (tree-select bit 0)
@@ -565,12 +609,12 @@ follows:
 .fi
 
 .ti 0
-3.5. Complex Huffman codes
+3.5. Complex prefix codes
 
-A complex Huffman code is a canonical Huffman code, defined by the
+A complex prefix code is a canonical prefix code, defined by the
 sequence of code lengths, as discussed in Paragraph 3.2, above.
 For even greater compactness, the code length sequences themselves
-are compressed using a Huffman code. The alphabet for code lengths
+are compressed using a prefix code. The alphabet for code lengths
 is as follows:
 
 .nf
@@ -598,12 +642,12 @@ is as follows:
 
 A code length of 0 indicates that the corresponding symbol in the
 alphabet will not occur in the compressed data, and should not
-participate in the Huffman code construction algorithm given
-earlier. A complex Huffman code must have at least two non-zero
+participate in the prefix code construction algorithm given
+earlier. A complex prefix code must have at least two non-zero
 code lengths.
 
-The bit lengths of the Huffman code over the code length alphabet
-are compressed with the following static Huffman code:
+The bit lengths of the prefix code over the code length alphabet
+are compressed with the following static prefix code:
 
 .nf
 .KS
@@ -618,13 +662,13 @@ are compressed with the following static Huffman code:
 .KE
 .fi
 
-We can now define the format of the complex Huffman code as
+We can now define the format of the complex prefix code as
 follows:
 
 .nf
    2 bits: HSKIP, values of 0, 2 or 3 represent the respective
            number of leading zeros. (Value of 1 indicates the
-           Simple Huffman code.)
+           Simple prefix code.)
 
    Code lengths for symbols in the code length alphabet given
       just above, in the order: 1, 2, 3, 4, 0, 5, 17, 6, 16, 7,
@@ -632,7 +676,7 @@ follows:
 
       The code lengths of code length symbols are between 0 and
       5 and they are represented with 2 - 5 bits according to
-      the static Huffman code above. A code length of 0 means
+      the static prefix code above. A code length of 0 means
       the corresponding code length symbol is not used.
 
       If HSKIP is 2 or 3, a respective number of leading code
@@ -644,7 +688,7 @@ follows:
       over all the non-zero code lengths must equal to 32.
 
    Sequence of code lengths symbols, encoded using the code
-      length Huffman code. Any trailing 0 or 17 must be
+      length prefix code. Any trailing 0 or 17 must be
       omitted, i.e. the last encoded code length symbol must be
       between 1 and 16. The sum of (32768 >> code length) over
       all the non-zero code lengths in the alphabet, including
@@ -662,7 +706,7 @@ details to the encoding of distances.
 Each distance in the compressed data part of a meta-block is
 represented with a pair <distance code, extra bits>. The distance
 code and the extra bits are encoded back-to-back, the distance code
-is encoded using a Huffman code over the distance code alphabet,
+is encoded using a prefix code over the distance code alphabet,
 while the extra bits value is encoded as a fixed-width machine
 integer. The number of extra bits can be 0 - 24, and it is dependent
 on the distance code.
@@ -738,7 +782,7 @@ Given a distance code "dcode" (>= 16 + NDIRECT), and extra bits
 5. Encoding of literal insertion lengths and copy lengths
 
 As described in Section 2, the literal insertion lengths and backward
-copy lengths are encoded using a single Huffman code. This section
+copy lengths are encoded using a single prefix code. This section
 provides the details to this encoding.
 
 Each <insertion length, copy length> pair in the compressed data part
@@ -748,7 +792,7 @@ of a meta-block is represented with the following triplet:
 
 The insert-and-copy length code, the insert extra bits and the copy
 extra bits are encoded back-to-back, the insert-and-copy length code
-is encoded using a Huffman code over the insert-and-copy length code
+is encoded using a prefix code over the insert-and-copy length code
 alphabet, while the extra bits values are encoded as fixed-width
 machine integers. The number of insert and copy extra bits can be
 0 - 24, and they are dependent on the insert-and-copy length code.
@@ -850,7 +894,7 @@ part of the meta-block, right before the start of each new block of a
 particular block category.
 
 Each block type in the compressed data is represented with a block
-type code, encoded using a Huffman code over the block type code
+type code, encoded using a prefix code over the block type code
 alphabet. A block type code 0 means that the block type is the same
 as the type of the second last block from the same block category,
 while a block type code 1 means that the block type equals the last
@@ -878,7 +922,7 @@ NBLTYPESD + 2, respectively.
 Each block length in the compressed data is represented with a pair
 <block length code, extra bits>. The block length code and the extra
 bits are encoded back-to-back, the block length code is encoded using
-a Huffman code over the block length code alphabet, while the extra
+a prefix code over the block length code alphabet, while the extra
 bits value is encoded as a fixed-width machine integer. The number of
 extra bits can be 0 - 24, and it is dependent on the block length
 code. The symbols of the block length code alphabet, along with the
@@ -909,12 +953,12 @@ implicit zero.
 .ti 0
 7. Context modeling
 
-As described in Section 2, the Huffman tree used to encode a literal
+As described in Section 2, the prefix tree used to encode a literal
 byte or a distance code depends on the context ID and the block type.
 This section specifies how to compute the context ID for a particular
 literal and distance code, and how to encode the context map that
-maps a <context ID, block type> pair to the index of a Huffman
-tree in the array of literal and distance Huffman trees.
+maps a <context ID, block type> pair to the index of a prefix
+code in the array of literal and distance prefix codes.
 
 .ti 0
 7.1. Context modes and context ID lookup for literals
@@ -1038,26 +1082,26 @@ There are two kinds of context maps, for literals and for
 distances. The size of the context map is 64 * NBLTYPESL for
 literals, and 4 * NBLTYPESD for distances. Each value in the
 context map is an integer between 0 and 255, indicating the index
-of the Huffman tree to be used when encoding the next literal or
+of the prefix code to be used when encoding the next literal or
 distance.
 
 The context map is encoded as a one-dimensional array,
 CMAPL[0..(64 * NBLTYPESL - 1)] and CMAPD[0..(4 * NBLTYPESD - 1)].
 
-The index of the Huffman tree for encoding a literal or distance
+The index of the prefix code for encoding a literal or distance
 code with context ID "cid" and block type "bltype" is
 
-   index of literal Huffman tree = CMAPL[bltype * 64 + cid]
+   index of literal prefix code = CMAPL[bltype * 64 + cid]
 
-   index of distance Huffman tree = CMAPD[bltype * 4 + cid]
+   index of distance prefix code = CMAPD[bltype * 4 + cid]
 
 The values of the context map are encoded with the combination
-of run length encoding for zero values and Huffman coding. Let
+of run length encoding for zero values and prefix coding. Let
 RLEMAX denote the number of run length codes and NTREES denote the
 maximum value in the context map plus one. NTREES must equal the
 number of different values in the context map, in other words,
 the different values in the context map must be the [0..NTREES-1]
-interval. The alphabet of the Huffman code has the following
+interval. The alphabet of the prefix code has the following
 RLEMAX + NTREES symbols:
 
 .nf
@@ -1081,14 +1125,14 @@ for literal and distance context maps):
    1-5 bits: RLEMAX, 0 is encoded with one 0 bit, and values
              1 - 16 are encoded with bit pattern 1xxxx
 
-   Huffman code with alphabet size NTREES + RLEMAX
+   Prefix code with alphabet size NTREES + RLEMAX
 
-   Context map size values encoded with the above Huffman code
+   Context map size values encoded with the above prefix code
       and run length coding for zero values
 
    1 bit:  IMTF bit, if set, we do an inverse move-to-front
            transform on the values in the context map to get
-           the Huffman code indexes
+           the prefix code indexes
 .fi
 
 For the encoding of NTREES see Section 9.2. We define the
@@ -1296,10 +1340,10 @@ the following:
                     65-128   1110xxxxxx
                    129-256   1111xxxxxxx
 
-      Huffman code over the block type code alphabet for literal
+      Prefix code over the block type code alphabet for literal
          block types, appears only if NBLTYPESL >= 2
 
-      Huffman code over the block length code alphabet for literal
+      Prefix code over the block length code alphabet for literal
          block lengths, appears only if NBLTYPESL >= 2
 
       Block length code + Extra bits for first literal block 
@@ -1308,10 +1352,10 @@ the following:
    1-11 bits: NBLTYPESI, # of insert-and-copy block types, encoded
               with the same variable length code as above
 
-      Huffman code over the block type code alphabet for insert-
+      Prefix code over the block type code alphabet for insert-
          and-copy block types, only if NBLTYPESI >= 2
 
-      Huffman code over the block length code alphabet for insert-
+      Prefix code over the block length code alphabet for insert-
          and-copy block lengths, only if NBLTYPESI >= 2
 
       Block length code + Extra bits for first insert-and-copy
@@ -1320,10 +1364,10 @@ the following:
    1-11 bits: NBLTYPESD, # of distance block types, encoded with
               the same variable length code as above
 
-      Huffman code over the block type code alphabet for distance
+      Prefix code over the block type code alphabet for distance
          block types, appears only if NBLTYPESD >= 2
 
-      Huffman code over the block length code alphabet for
+      Prefix code over the block length code alphabet for
          distance block lengths, only if NBLTYPESD >= 2
 
       Block length code + Extra bits for first distance block
@@ -1337,25 +1381,25 @@ the following:
 
       NBLTYPESL x 2 bits: context mode for each literal block type
 
-   1-11 bits: NTREESL, # of literal Huffman trees, encoded with
+   1-11 bits: NTREESL, # of literal prefix trees, encoded with
               the same variable length code as NBLTYPESL
 
       Literal context map, encoded as described in Paragraph 7.3,
          appears only if NTREESL >= 2, otherwise the context map
          has only zero values
 
-   1-11 bits: NTREESD, # of distance Huffman trees, encoded with
+   1-11 bits: NTREESD, # of distance prefix trees, encoded with
               the same variable length code as NBLTYPESD
 
       Distance context map, encoded as described in Paragraph 7.3,
          appears only if NTREESD >= 2, otherwise the context map
          has only zero values
 
-      NTREESL Huffman codes for literals
+      NTREESL prefix codes for literals
 
-      NBLTYPESI Huffman codes for insert-and-copy lengths
+      NBLTYPESI prefix codes for insert-and-copy lengths
 
-      NTREESD Huffman codes for distances
+      NTREESD prefix codes for distances
 .fi
 
 .ti 0
@@ -1374,7 +1418,7 @@ commands. Each command has the following format:
          previous insert and-copy block has ended
 
       Insert-and-copy length, encoded as in section 5, using the
-         insert-and-copy length Huffman code with the current
+         insert-and-copy length prefix code with the current
          insert-and-copy block type index
 
       Insert length number of literals, with the following format:
@@ -1388,7 +1432,7 @@ commands. Each command has the following format:
             previous literal block has ended
 
          Next byte of the input data, encoded with the literal
-            Huffman code with the index determined by the
+            prefix code with the index determined by the
             previuos two bytes of the input data, the current
             literal block type and the context map, as
             described in Paragraph 7.3.
@@ -1402,7 +1446,7 @@ commands. Each command has the following format:
          distance block has ended
 
       Distance code, encoded as in section 4, using the distance
-         Huffman code with the current distance block type index,
+         prefix code with the current distance block type index,
          appears only if the distance code is not an implicit 0,
          as indicated by the insert-and-copy length code
 .fi
@@ -1434,8 +1478,8 @@ The decoding algorithm that produces the output data is as follows:
       loop for each three block categories (i = L, I, D)
          read NBLTYPESi
          if NBLTYPESi >= 2
-            read Huffman code for block types, HTREE_BTYPE_i
-            read Huffman code for block lengths, HTREE_BLEN_i
+            read prefix code for block types, HTREE_BTYPE_i
+            read prefix code for block lengths, HTREE_BLEN_i
             read block length, BLEN_i
             set block type, BTYPE_i to 0
             initialize second last and last block types to 0 and 1
@@ -1454,9 +1498,9 @@ The decoding algorithm that produces the output data is as follows:
          read distance context map, CMAPD[]
       else
          fill CMAPD[] with zeros
-      read array of Huffman codes for literals, HTREEL[]
-      read array of Huffman codes for insert-and-copy, HTREEI[]
-      read array of Huffman codes for distances, HTREED[]
+      read array of prefix codes for literals, HTREEL[]
+      read array of prefix codes for insert-and-copy, HTREEI[]
+      read array of prefix codes for distances, HTREED[]
       do
          if BLEN_I is zero
             read block type using HTREE_BTYPE_I and set BTYPE_I
@@ -1547,7 +1591,7 @@ http://www.ietf.org/rfc/rfc1951.txt
 .ti 0
 14. Source code
 
-Source code for a C language implementation of a "brotli" compliant
+Source code for a C language implementation of a brotli compliant
 decompressor and a C++ language implementation of a compressor is
 available in the brotli open-source project:
 https://github.com/google/brotli
