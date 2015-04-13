@@ -4,23 +4,22 @@
  * For conditions of distribution and use, see the accompanying LICENSE file.
  *
  * yeast.c is a simple decompressor of the brotli format, written to both test
- * the completeness and correctness of the brotli specification, and once
- * verified, to provide an unambiguous specification of the format by virtue of
- * being a working decoder.  It is a higher priority for this code be simple
- * and readable than to be fast.
+ * the completeness and correctness of the brotli specification, and to provide
+ * an unambiguous specification of the format by virtue of being a working
+ * decoder.  It is a higher priority for this code be simple and readable than
+ * to be fast.
  *
- * This code is intended to be compliant with the C99 standard and portable.
+ * This code is intended to be compliant with the C99 standard, and portable.
  */
 
-#include <stdlib.h>
-#include <string.h>
-#include <stddef.h>
-#include <inttypes.h>
-#include <assert.h>
-#include "try.h"
-#include "yeast.h"
+#include <stdlib.h>     /* size_t, NULL, realloc(), free() */
+#include <string.h>     /* strlen(), memcpy(), memcmp() */
+#include <inttypes.h>   /* int32_t, uint32_t, PRIu32, SIZE_MAX */
+#include <assert.h>     /* assert() */
+#include "try.h"        /* try, preserve, always, catch, throw(), ball_t */
+#include "yeast.h"      /* yeast(), yeast_verbosity */
 
-/* Verify that size_t is at least 32 bits. */
+/* Check that size_t is at least 32 bits. */
 #if SIZE_MAX < 4294967295
 #  error size_t is less than 32 bits
 #endif
@@ -61,8 +60,11 @@ local void *alloc(void *mem, size_t size)
 /* The maximum number of bits in a prefix code. */
 #define MAXBITS 15
 
-/* The maximum number of symbols in an alphabet. */
-#define MAXSYMS 704
+/* Define the maximum number of symbols in the alphabets. */
+#define MAXIACS 704         /* see table in specification */
+#define MAXLITS 256         /* number of byte values */
+#define MAXDISTS 520        /* 16 + (15 << 3) + (48 << 3) */
+#define MAXSYMS MAXIACS     /* maximum over all alphabets */
 
 /*
  * Prefix code decoding table type.  count[0..MAXBITS] are the number of
@@ -83,7 +85,9 @@ typedef struct {
 } prefix_t;
 
 /*
- * Brotli decoding state.  About 26K bytes, plus allocated prefix codes.
+ * Brotli decoding state.  About 26K bytes (assuming 64-bit size_t and pointer
+ * types and 16-bit shorts), plus allocated prefix codes.  The allocated prefix
+ * codes can in principle be as large as 3 * 256 * 1440 = 1,105,920 bytes.
  */
 typedef struct {
     /* input state */
@@ -143,10 +147,10 @@ typedef struct {
 } state_t;
 
 /*
- * Return need bits from the input stream.  need must be in 0..26.  This will
+ * Return need bits from the input stream.  need must be in 0..25.  This will
  * leave 0..7 bits in s->bits.
  *
- * Format notes:
+ * Format note:
  *
  * - Bits are stored in bytes from the least significant bit to the most
  *   significant bit.  Therefore bits are dropped from the bottom of the bit
@@ -157,7 +161,7 @@ local uint32_t bits(state_t *s, unsigned need)
 {
     uint32_t reg;       /* register in which to accumulate need bits */
 
-    assert(need < 26);
+    assert(need <= 32 - 7);
     reg = s->bits;
     while (s->left < need) {
         if (s->len == 0)
@@ -245,7 +249,7 @@ local void construct(prefix_t *p, unsigned char const *length, unsigned n)
 
     assert(n < MAXSYMS);
 
-    /* count number of codes of each non-zero length */
+    /* count the number of codes of each non-zero length */
     for (len = 0; len <= MAXBITS; len++)
         p->count[len] = 0;
     for (symbol = 0; symbol < n; symbol++) {
@@ -271,12 +275,13 @@ local void construct(prefix_t *p, unsigned char const *length, unsigned n)
 }
 
 /*
- * Swap list[i] and list[j] if they are not in order.
+ * Swap list[i] and list[j] if they are not in order.  An element of list[] is
+ * assumed to fit in an unsigned int.
  */
 #define ORDER(list, i, j) \
     do { \
         if (list[i] > list[j]) { \
-            unsigned short tmp = list[i]; \
+            unsigned tmp = list[i]; \
             list[i] = list[j]; \
             list[j] = tmp; \
         } \
@@ -289,9 +294,10 @@ local void construct(prefix_t *p, unsigned char const *length, unsigned n)
  * lengths 2, 2, 2, 2; and 5 for four symbols of code lengths 1, 2, 3, 3.
  *
  * Format note:
+ *
  * - The symbols provided in the stream are in order with respect to the bit
  *   lengths corresponding to the types.  However they may not be in order
- *   within each bit length.  In fact, there are cases in example compressed
+ *   within each bit length.  In fact, there are cases in brotli compressed
  *   data where this is seen.  Here symbols of the same bit length are sorted
  *   in order to generate a canonical code.
  */
@@ -343,6 +349,7 @@ local void simple(prefix_t *p, unsigned short const *syms, unsigned type)
  * maximum number of symbols in the alphabet.
  *
  * Format note:
+ *
  * - A complex code length code with a single non-zero code length is
  *   permitted.  That length must be 1, and is interpreted as an actual code
  *   length of zero bits to code the single symbol that had length 1.
@@ -418,7 +425,7 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         /* read the code length code lengths using the fixed code length code
            lengths code above, and make the code length code for reading the
            code lengths (seriously) */
-        left = 1 << 5;
+        left = 1 << 5;                  /* 5 is the max length (see code) */
         nsym = 0;
         rep = 0;                        /* count of non-zero lengths */
         while (nsym < hskip)
@@ -513,7 +520,7 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
 
 #ifdef DEBUG
     /* show the prefix code */
-    {
+    if (yeast_verbosity >= 5) {
         unsigned n, k, i;
 
         i = 0;
@@ -559,6 +566,9 @@ local size_t block_length(state_t *s, prefix_t *p)
  * Decode the number of block types.
  *
  * Format note:
+ *
+ * - This will return a number in 1..256.
+ *
  * - Version 02 of the brotli specification is rather misleading on how this is
  *   coded.  The "variable length code" is actually a leading 0 or 1, followed
  *   by a three-bit integer (not a reversed code) which is the number of extra
@@ -570,9 +580,9 @@ local size_t block_length(state_t *s, prefix_t *p)
  *   would be stored in the stream in reverse order, 0011101.  It is not.  If
  *   the first four bits were a prefix code, then they would be stored in
  *   reverse order, with the remaining three bits in normal order, like extra
- *   bits, i.e. 1001101.  It is not. Instead the first bit comes in at the
+ *   bits, i.e. 1001101.  It is not.  Instead the first bit comes in at the
  *   bottom, followed by the next three bits *not* reversed, followed by the
- *   extra bits not reversed. I.e. 1000111.
+ *   extra bits not reversed.  I.e. 1000111.
  */
 local unsigned block_types(state_t *s)
 {
@@ -668,7 +678,7 @@ local size_t insert_length(state_t *s, unsigned sym)
         24
     };
 
-    assert(sym < 704);
+    assert(sym < MAXIACS);
     sym = map[sym >> 6] + ((sym >> 3) & 7);
     return (size_t)base[sym] + bits(s, extra[sym]);
 }
@@ -691,7 +701,7 @@ local size_t copy_length(state_t *s, unsigned sym)
         24
     };
 
-    assert(sym < 704);
+    assert(sym < MAXIACS);
     sym = map[sym >> 6] + (sym & 7);
     return (size_t)base[sym] + bits(s, extra[sym]);
 }
@@ -952,6 +962,23 @@ local size_t dict_word(unsigned char *dest, size_t copy, size_t id)
 
 /*
  * Decompress one meta-block.  Return true if this is the last meta-block.
+ *
+ * Format notes:
+ *
+ * - The meta-block data (what follows the meta-block header) is one or more
+ *   sets of: insert and copy lengths, literals to insert, and a distance.
+ *   Once the distance is read, output is copied from the previous output or
+ *   the static dictionary (possibly transformed).  So for each set, output is
+ *   generated from a string of literals and one copy operation.  The
+ *   meta-block is deemed complete when the total number of uncompressed bytes
+ *   has been generated (MLEN), either at the end of the insertion of the
+ *   literals or after the copy operation.  If MLEN is reached after the
+ *   insertion of the literals, then a distance is not read, and the copy
+ *   length is ignored.  The ignored copy length is always 4.
+ *
+ * - MLEN must be reached exactly at one of those points.  If MLEN is exceeded
+ *   during the insertion of literals or during the copy operation, then the
+ *   stream is invalid.
  */
 local unsigned metablock(state_t *s)
 {
@@ -1096,13 +1123,13 @@ local unsigned metablock(state_t *s)
     trace(2, "%u literal prefix code%s", PLURAL(s->lit_codes));
     s->lit_code = alloc(NULL, s->lit_codes * sizeof(prefix_t));
     for (n = 0; n < s->lit_codes; n++)
-        prefix(s, s->lit_code + n, 256);                /* HTREEL[n] */
+        prefix(s, s->lit_code + n, MAXLITS);            /* HTREEL[n] */
 
     /* get iac_num insert and copy prefix codes */
     trace(2, "%u insert and copy prefix code%s", PLURAL(s->iac_num));
     s->iac_code = alloc(NULL, s->iac_num * sizeof(prefix_t));
     for (n = 0; n < s->iac_num; n++)
-        prefix(s, s->iac_code + n, 704);                /* HTREEI[n] */
+        prefix(s, s->iac_code + n, MAXIACS);            /* HTREEI[n] */
 
     /* get dist_codes distance prefix codes */
     trace(2, "%u distance prefix code%s", PLURAL(s->dist_codes));
@@ -1111,7 +1138,8 @@ local unsigned metablock(state_t *s)
         prefix(s, s->dist_code + n, dists);             /* HTREED[n] */
 
     /* done with header */
-    trace(2, "end of meta-block header");
+    trace(2, "end of meta-block header (%u total prefix codes)",
+          s->lit_codes + s->iac_num + s->dist_codes);
 
     /* decode the meta-block data */
     do {
@@ -1175,8 +1203,11 @@ local unsigned metablock(state_t *s)
 
         /* if reached mlen, then done (ignore copy length, even though it's not
            zero) */
-        if (mlen == 0)
+        if (mlen == 0) {
+            if (copy != 4)
+                throw(3, "ignored copy length was not 4 (was %zu)", copy);
             break;
+        }
 
         /* get the copy distance */
         max = s->got > s->wsize ? s->wsize : s->got;

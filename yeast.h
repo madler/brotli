@@ -5,7 +5,7 @@
  */
 
 /*
- * Decompress the compressed brolti stream in source[0..*len-1].  If cmp is
+ * Decompress the compressed brotli stream in source[0..*len-1].  If cmp is
  * false, return the decompressed data.  In this case, on return *len is
  * updated to the number of bytes used in the compressed stream, *dest is an
  * allocated buffer with the uncompressed data, and *got is the number of bytes
