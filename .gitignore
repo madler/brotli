@@ -1,1 +1,6 @@
 .DS_Store
+*.o
+testbig/
+deb
+juxt
+brotli-02-edit.txt
