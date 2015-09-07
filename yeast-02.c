@@ -351,9 +351,8 @@ local void simple(prefix_t *p, unsigned short const *syms, unsigned type)
  * Format note:
  *
  * - A complex code length code with a single non-zero code length is
- *   permitted.  That length can be any value, which is ignored, and is
- *   interpreted as an actual code length of zero bits to code that single
- *   symbol.
+ *   permitted.  That length must be 1, and is interpreted as an actual code
+ *   length of zero bits to code the single symbol that had length 1.
  */
 local void prefix(state_t *s, prefix_t *p, unsigned num)
 {
@@ -446,7 +445,7 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         }
         if (left < 0)
             throw(3, "oversubscribed code length code");
-        if (left && rep != 1)
+        if (left && (rep != 1 || left != (1 << 4)))
             throw(3, "incomplete code length code");
         while (nsym < ORD)
             lens[order[nsym++]] = 0;
@@ -997,52 +996,19 @@ local unsigned metablock(state_t *s)
 
     /* read and process the meta-block header */
 
-    /* get last marker, and check for empty block if last -- name changed to
-       ISLASTEMPTY in version 04 of the draft brotli specification, but
-       function remains the same */
+    /* get last marker, and check for empty block if last */
     last = bits(s, 1);                                  /* ISLAST */
     trace(1, "%smeta-block", last ? "last " : "");
     if (last) {
-        if (bits(s, 1)) {                               /* ISLASTEMPTY */
+        if (bits(s, 1)) {                               /* ISEMPTY */
             trace(1, "empty meta-block");
             trace(1, "end of last meta-block");
             return last;
         }
     }
 
-    /* get the number of bytes to decompress in meta-block -- changed in
-       version 04 of the draft brotli specification to add meta-data blocks and
-       to reduce the maximum block size from 256 MiB to 16 MiB -- this change
-       is compatible with previous streams, so long as they never used block
-       sizes > 16 MiB */
+    /* get the number of bytes to decompress in meta-block */
     n = bits(s, 2);                                     /* MNIBBLES - 4 */
-    if (n == 3) {                                       /* meta-data block */
-        if (bits(s, 1))
-            throw(3, "invalid reserved bit in meta-data block");
-        n = bits(s, 2);                                 /* MSKIPBYTES */
-        mlen = n ? bits(s, n << 3) + 1 : 0;             /* MSKIPLEN */
-        if (n > 1 & (mlen >> ((n - 1) << 3)) == 0)
-            throw(3, "more meta-data length bytes than needed");
-
-        /* discard any leftover bits to go to byte boundary */
-        if (s->left && s->bits)
-            throw(3, "discarded bits before meta-data not zero");
-        s->bits = 0;
-        s->left = 0;
-
-        /* skip the meta-data */
-        if (mlen) {
-            if (mlen > s->len)
-                throw(2, "premature end of input");
-            trace(1, "meta-block with %zu bytes of meta-data", mlen);
-            s->len -= mlen;
-            s->next += mlen;
-        }
-        else
-            trace(1, "empty mid-stream meta-block");
-        trace(1, "end of meta-block");
-        return last;
-    }
     mlen = 1 + bits(s, 16);                             /* MLEN low 4 nybs */
     if (n) {
         mlen += bits(s, n << 2) << 16;                  /* MLEN remainder */
@@ -1238,7 +1204,8 @@ local unsigned metablock(state_t *s)
         /* if reached mlen, then done (ignore copy length, even though it's not
            zero) */
         if (mlen == 0) {
-            trace(2, "unused copy length %zu at end of block", copy);
+            if (copy != 4)
+                throw(3, "ignored copy length was not 4 (was %zu)", copy);
             break;
         }
 
@@ -1306,12 +1273,6 @@ local unsigned metablock(state_t *s)
             } while (--copy);
         }
     } while (mlen);
-    if (s->lit_left && s->lit_left < (((size_t)0 - 1) >> 1))
-        trace(2, "%zu unused literals in last block type", s->lit_left);
-    if (s->iac_left && s->iac_left < (((size_t)0 - 1) >> 1))
-        trace(2, "%zu unused inserts in last block type", s->iac_left);
-    if (s->dist_left && s->dist_left < (((size_t)0 - 1) >> 1))
-        trace(2, "%zu unused distances in last block type", s->dist_left);
 
     /* return true if this is the last meta-block */
     trace(1, "end of %smeta-block", last ? "last " : "");
@@ -1375,17 +1336,8 @@ int yeast(void **dest, size_t *got, void const *source, size_t *len, int cmp)
         }
     }
     preserve {
-        /* get the sliding window size (1 KiB to 16 MiB) -- this was changed in
-           version 04 of the draft brotli specification to permit smaller
-           windows, going from 16..24 bits to 10..24 bits -- the change is
-           compatible with previous streams, so long as those streams never
-           used a WBITS of 17 */
-        unsigned b = bits(s, 1);
-        s->wbits =                                      /* WBITS (10..24) */
-            b ? (b = bits(s, 3)) ? b + 17 :
-                (b = bits(s, 3)) ? b + 8 : 17 : 16;
-        if (s->wbits == 9)
-            throw(3, "invalid number of window bits");
+        /* get the sliding window size */
+        s->wbits = bits(s, 1) ? bits(s, 3) + 17 : 16;  /* WBITS */
         s->wsize = ((uint32_t)1 << s->wbits) - 16;
         trace(1, "window size = %" PRIu32 " (%u bits)", s->wsize, s->wbits);
 
