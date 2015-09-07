@@ -569,21 +569,6 @@ local size_t block_length(state_t *s, prefix_t *p)
  * Format note:
  *
  * - This will return a number in 1..256.
- *
- * - Version 02 of the brotli specification is rather misleading on how this is
- *   coded.  The "variable length code" is actually a leading 0 or 1, followed
- *   by a three-bit integer (not a reversed code) which is the number of extra
- *   bits as well as a value from which the base can be readily computed.  That
- *   is followed by the extra bits, not reversed.
- *
- *   The specification shows "1011xxx" for the range 9-16.  So in that format,
- *   the value 13 is 1011100.  If this were actually a variable-length code, it
- *   would be stored in the stream in reverse order, 0011101.  It is not.  If
- *   the first four bits were a prefix code, then they would be stored in
- *   reverse order, with the remaining three bits in normal order, like extra
- *   bits, i.e. 1001101.  It is not.  Instead the first bit comes in at the
- *   bottom, followed by the next three bits *not* reversed, followed by the
- *   extra bits not reversed.  I.e. 1000111.
  */
 local unsigned block_types(state_t *s)
 {
@@ -975,7 +960,7 @@ local size_t dict_word(unsigned char *dest, size_t copy, size_t id)
  *   has been generated (MLEN), either at the end of the insertion of the
  *   literals or after the copy operation.  If MLEN is reached after the
  *   insertion of the literals, then a distance is not read, and the copy
- *   length is ignored.  The ignored copy length is always 4.
+ *   length is ignored.
  *
  * - MLEN must be reached exactly at one of those points.  If MLEN is exceeded
  *   during the insertion of literals or during the copy operation, then the
