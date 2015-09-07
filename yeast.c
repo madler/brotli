@@ -412,14 +412,14 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         unsigned short const order[] = {
             1, 2, 3, 4, 0, 5, 17, 6, 16, 7, 8, 9, 10, 11, 12, 13, 14, 15
         };
-#       define ORD (sizeof(order) / sizeof(unsigned short))
+#       define CODE_LENGTH_CODES (sizeof(order) / sizeof(unsigned short))
 
         /* initially the code for code length code lengths, then reused for
            the code lengths code */
         prefix_t code = {{0, 0, 3, 1, 2}, {0, 3, 4, 2, 1, 5}};
 
         /* lengths read for the code lengths code, then reused for the code */
-        unsigned char lens[num < ORD ? ORD : num];
+        unsigned char lens[num < CODE_LENGTH_CODES ? CODE_LENGTH_CODES : num];
 
         trace(4, "  complex prefix code (skip %u)", hskip);
 
@@ -431,7 +431,7 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         rep = 0;                        /* count of non-zero lengths */
         while (nsym < hskip)
             lens[order[nsym++]] = 0;
-        while (nsym < ORD) {
+        while (nsym < CODE_LENGTH_CODES) {
             len = decode(s, &code);
             n = order[nsym++];
             trace(5, "  (%u,%u)", n, len);
@@ -448,7 +448,7 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
             throw(3, "oversubscribed code length code");
         if (left && rep != 1)
             throw(3, "incomplete code length code");
-        while (nsym < ORD)
+        while (nsym < CODE_LENGTH_CODES)
             lens[order[nsym++]] = 0;
         if (left) {                     /* special case for one symbol */
             code.symbol[0] = last;
@@ -516,7 +516,7 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
 
         /* make the code */
         construct(p, lens, nsym);
-#       undef ORD
+#       undef CODE_LENGTH_CODES
     }
 
 #ifdef DEBUG
