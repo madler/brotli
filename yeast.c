@@ -928,6 +928,8 @@ local size_t dict_word(unsigned char *dest, size_t copy, size_t id)
     xform = id >> ndbits[copy];
     if (xform >= NTRANSFORMS)
         throw(3, "static dictionary transform out of range");
+    trace(4, "static dictionary index %zu, length %zu, transform %zu",
+          index, copy, xform);
     index = doffset[copy] + index * copy;
 
     /* prefix */

@@ -1,4 +1,4 @@
-local xform_t const xforms[] = {
+static xform_t const xforms[] = {
     /*   0 */ {        "", identity,       0, ""},
     /*   1 */ {        "", identity,       0, " "},
     /*   2 */ {       " ", identity,       0, " "},
@@ -20,7 +20,7 @@ local xform_t const xforms[] = {
     /*  18 */ {      "e ", identity,       0, " "},
     /*  19 */ {        "", identity,       0, "\""},
     /*  20 */ {        "", identity,       0, "."},
-    /*  21 */ {        "", identity,       0, "\"&gt;"},
+    /*  21 */ {        "", identity,       0, "\">"},
     /*  22 */ {        "", identity,       0, "\n"},
     /*  23 */ {        "", omitlast,       3, ""},
     /*  24 */ {        "", identity,       0, "]"},
@@ -68,7 +68,7 @@ local xform_t const xforms[] = {
     /*  66 */ {        "", uppercasefirst, 0, "\""},
     /*  67 */ {       ".", identity,       0, "("},
     /*  68 */ {        "", uppercaseall,   0, " "},
-    /*  69 */ {        "", uppercasefirst, 0, "\"&gt;"},
+    /*  69 */ {        "", uppercasefirst, 0, "\">"},
     /*  70 */ {        "", identity,       0, "=\""},
     /*  71 */ {       " ", identity,       0, "."},
     /*  72 */ {   ".com/", identity,       0, ""},
@@ -96,7 +96,7 @@ local xform_t const xforms[] = {
     /*  94 */ {        "", uppercaseall,   0, "'"},
     /*  95 */ {        "", identity,       0, "est "},
     /*  96 */ {       " ", uppercasefirst, 0, "."},
-    /*  97 */ {        "", uppercaseall,   0, "\"&gt;"},
+    /*  97 */ {        "", uppercaseall,   0, "\">"},
     /*  98 */ {       " ", identity,       0, "='"},
     /*  99 */ {        "", uppercasefirst, 0, ","},
     /* 100 */ {        "", identity,       0, "ize "},

@@ -7,15 +7,16 @@
 # 0 to 120.
 
 require 'open-uri'
-spec = "https://tools.ietf.org/html/draft-alakuijala-brotli-02"
+spec = "https://tools.ietf.org/html/draft-alakuijala-brotli-04"
 n = 0
-puts "xform_t const xforms[] = {"
+puts "static xform_t const xforms[] = {"
 open(spec).each do |line|
     if line =~ /^\s*(\d+)\s+("(\\.|[^"])*")\s+([A-Za-z]+)(\d*)\s+("(\\.|[^"])*")\s*$/
         $stderr.puts "out of sequence" if $1.to_i != n
-        printf "    /* %3d */ {%10s, %-15s %d, %s},\n", $1.to_i, $2, $4.downcase + ",", $5.to_i, $6
+        printf ",\n" unless n == 0
+        printf "    /* %3d */ {%10s, %-15s %d, %s}", $1.to_i, $2, $4.downcase + ",", $5.to_i, $6.sub(/&gt;/, ">")
         n += 1
     end
 end
-puts "};"
+puts "\n};"
 $stderr.puts "expected 121" if n != 121

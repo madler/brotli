@@ -40,7 +40,6 @@ local size_t xblock(unsigned char *buf)
     for (n = 0; n < sizeof(xforms) / sizeof(xform_t); n++) {
         p = stpcpy(p, xforms[n].prefix) + 1;
         *p++ = xforms[n].xelem + xforms[n].omit;
-        printf("%u\n", p[-1]);
         p = stpcpy(p, xforms[n].suffix) + 1;
     }
     return p - (char *)buf;
