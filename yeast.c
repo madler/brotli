@@ -387,7 +387,7 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
         for (n = 0; n < nsym; n++) {
             sym = bits(s, abits);
             if (sym >= num)
-                throw(3, "modulo really needed?");
+                throw(3, "simple code symbol not in alphabet");
             syms[n] = sym;
         }
 
@@ -468,8 +468,6 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
             if (len < 16) {
                 /* not coded (0), or a code length in 1..15 -- only update last
                    if the length is not zero */
-                if (nsym == num)
-                    throw(3, "too many symbols");
                 lens[nsym++] = len;
                 if (len) {
                     left -= ((int32_t)1 << MAXBITS) >> len;
@@ -487,7 +485,7 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
                 rep = (rep ? (rep - 2) << 2 : 0) + 3 + bits(s, 2);
                 n = rep - n;
                 if (nsym + n > num)
-                    throw(3, "too many symbols");
+                    throw(3, "too many repeats");
                 left -= n * (((int32_t)1 << MAXBITS) >> last);
                 if (left < 0)
                     break;
@@ -504,13 +502,15 @@ local void prefix(state_t *s, prefix_t *p, unsigned num)
                 zeros = (zeros ? (zeros - 2) << 3 : 0) + 3 + bits(s, 3);
                 n = zeros - n;
                 if (nsym + n > num)
-                    throw(3, "too many symbols");
+                    throw(3, "too many repeats");
                 do {
                     lens[nsym++] = 0;
                 } while (--n);
                 rep = 0;
             }
-        } while (left > 0);
+        } while (left > 0 && nsym < num);
+        if (left > 0)
+            throw(3, "incomplete code");
         if (left < 0)
             throw(3, "oversubscribed code");
 
@@ -993,41 +993,45 @@ local unsigned metablock(state_t *s)
         if (bits(s, 1)) {                               /* ISLASTEMPTY */
             trace(1, "empty meta-block");
             trace(1, "end of last meta-block");
+            if (s->left && s->bits)
+                throw(3, "discarded bits after end of stream not zero");
             return last;
         }
     }
 
     /* get the number of bytes to decompress in meta-block -- changed in
-       version 04 of the draft brotli specification to add meta-data blocks and
+       version 04 of the draft brotli specification to add metadata blocks and
        to reduce the maximum block size from 256 MiB to 16 MiB -- this change
        is compatible with previous streams, so long as they never used block
        sizes > 16 MiB */
     n = bits(s, 2);                                     /* MNIBBLES - 4 */
-    if (n == 3) {                                       /* meta-data block */
+    if (n == 3) {                                       /* metadata block */
         if (bits(s, 1))
-            throw(3, "invalid reserved bit in meta-data block");
+            throw(3, "invalid reserved bit in metadata block");
         n = bits(s, 2);                                 /* MSKIPBYTES */
         mlen = n ? bits(s, n << 3) + 1 : 0;             /* MSKIPLEN */
         if (n > 1 & (mlen >> ((n - 1) << 3)) == 0)
-            throw(3, "more meta-data length bytes than needed");
+            throw(3, "more metadata length bytes than needed");
+        if (last && n == 0)
+            throw(3, "last zero-length metadata instead of empty");
 
         /* discard any leftover bits to go to byte boundary */
         if (s->left && s->bits)
-            throw(3, "discarded bits before meta-data not zero");
+            throw(3, "discarded bits before metadata not zero");
         s->bits = 0;
         s->left = 0;
 
-        /* skip the meta-data */
+        /* skip the metadata */
         if (mlen) {
             if (mlen > s->len)
                 throw(2, "premature end of input");
-            trace(1, "meta-block with %zu bytes of meta-data", mlen);
+            trace(1, "meta-block with %zu bytes of metadata", mlen);
             s->len -= mlen;
             s->next += mlen;
         }
         else
-            trace(1, "empty mid-stream meta-block");
-        trace(1, "end of meta-block");
+            trace(1, "empty meta-block");
+        trace(1, "end of %smeta-block", last ? "last " : "");
         return last;
     }
     mlen = 1 + bits(s, 16);                             /* MLEN low 4 nybs */
@@ -1302,6 +1306,8 @@ local unsigned metablock(state_t *s)
 
     /* return true if this is the last meta-block */
     trace(1, "end of %smeta-block", last ? "last " : "");
+    if (last && s->left && s->bits)
+        throw(3, "discarded bits after end of stream not zero");
     return last;
 }
 
