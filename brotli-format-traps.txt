@@ -1,0 +1,133 @@
+3.4. Simple prefix codes
+
+"If the integer value is greater than or equal to the alphabet size, then the stream should be rejected as invalid."
+
+The symbols are provided as the minimum number of bits needed to cover the alphabet size. So for example, there 26 block count codes.  Five bits will cover those.  If a simple block count code presents a symbol value in 26..31, the stream is rejected as invalid.
+
+
+3.5. Complex prefix codes
+
+"If there are at least two non-zero code lengths, any trailing zero code lengths are omitted, i.e. the last code length in the sequence must be non-zero. In this case the sum of (32 >> code length) over all the non-zero code lengths must equal to 32."
+
+In short, the code length code must be complete, unless there is only one code symbol.  Any length is permitted for the one symbol, which ends up with zero length.  If the code is either oversubscribed or not complete and does not have one symbol, then the stream is rejected as invalid.
+
+
+3.5. Complex prefix codes
+
+"The sum of (32768 >> code length) over all the non-zero code lengths in the alphabet, including those encoded using repeat code(s) of 16, must equal to 32768."
+
+In short, all codes specified by a complex prefix code must be complete.  A single code is not permitted.  (That case is covered by a simple prefix code.)
+
+This includes the case where code lengths are read for all of the symbols in the alphabet, but the code is not yet complete.
+
+If the complex prefix code is oversubscribed or not complete, then the stream is rejected as invalid.
+
+
+3.5. Complex prefix codes
+
+If the number of times to repeat the previous length or repeat a zero length would result in more lengths in total than the number of symbols in the alphabet, then the stream is rejected as invalid.
+
+
+6. Encoding of block switch commands
+
+"Since the end of the meta-block is detected by the number of uncompressed bytes produced, the block counts for any of the three categories need not count down to exactly zero at the end of the meta-block."
+
+Unused block counts at the end of a meta-block are valid.
+
+
+7.3. Encoding of the context map
+
+If RLEMAX symbol would generate more zeros than the size of the map for any value of the extra bits (i.e. (1 << RLEMAX) > size of map), then the stream is rejected as invalid.
+
+
+7.3. Encoding of the context map
+
+If a run length would result in more lengths in total than the size of the map, then the stream is rejected as invalid.
+
+
+8. Static dictionary
+
+If the static dictionary word length (initial copy length) is greater than 24, then the stream is rejected as invalid.
+
+
+8. Static dictionary
+
+If the static dictionary word length (initial copy length) is less than 4, then the stream is rejected as invalid.
+
+
+8. Static dictionary
+
+If the transform number derived from the initial excess distance is greater than 120, then the stream is rejected as invalid.
+
+
+9.1. Format of the stream header
+
+"Note that bit pattern 0010001 is invalid and must not be used."
+
+If the stream starts with that pattern, then it is rejected as invalid.
+
+
+9.2. Format of the meta-block header
+
+"1 bit:  reserved, must be zero"
+
+If the reserved bit is one, then the stream is rejected as invalid.
+
+
+9.2. Format of the meta-block header
+
+"(if MSKIPBYTES is greater than 1, and the last byte is all zeros, then the stream should be rejected as invalid)"
+
+In short, if MSKIPBYTES is larger than it needs to be, then the stream is rejected as invalid.
+
+
+9.2. Format of the meta-block header
+
+If the last block is a metadata block and it has zero bytes of metadata, then the stream is rejected as invalid.  (It should have been an ISLASTEMPTY block instead.)
+
+
+9.2. Format of the meta-block header
+
+"0 - 7 bits: fill bits until the next byte boundary, must be all zeros"
+
+If the fill bits are not all zeros, then the stream is rejected as invalid.
+
+
+9.2. Format of the meta-block header
+
+"(if the number of nibbles is greater than 4, and the last nibble is all zeros, then the stream should be rejected as invalid)"
+
+In short, if MNIBBLES is larger than it needs to be, then the stream is rejected as invalid.
+
+
+9.2. Format of the meta-block header
+
+"(if the ignored bits are not all zeros, the stream should be rejected as invalid)"
+
+If the fill bits before uncompressed data are not all zeros, then the stream is rejected as invalid.
+
+
+9.3. Format of the meta-block data
+
+"The number of commands in the meta-block is such that the sum of insert lengths and copy lengths over all the commands gives the uncompressed length, MLEN encoded in the meta-block header."
+
+If the number of literals to insert, the copy length, or the resulting dictionary word length would cause MLEN to be exceeded, then the stream is rejected as invalid.
+
+(Just noticed that the quoted statement isn't quite correct, since the copy length for a static dictionary word may not be the actual number of bytes copied.  Also there may be an unused copy length at the end of the meta-block.  So two reasons the sum may not be equal to MLEN.)
+
+
+10. Decoding algorithm
+
+"(in this case the copy length is ignored and can have any value)"
+
+It is valid for an unused copy length at the end of a meta-block to have any value.
+
+
+10. Decoding algorithm
+
+If the bits that would be discarded, if any, in the last byte of the last meta-block are not zero, then the stream is rejected as invalid.
+
+
+10. Decoding algorithm
+
+If the stream ends before the completion of the last meta-block, then the stream is rejected as invalid.
