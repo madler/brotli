@@ -1,4 +1,4 @@
-/* Decompress a brotli streams on the command line or from stdin using yeast.
+/* Decompress brotli streams on the command line or from stdin using yeast.
    The compressed output is written to the same name with the suffix ".bro" or
    ".compressed" removed and ".out" added, or to "deb.out" when reading from
    stdin. */
