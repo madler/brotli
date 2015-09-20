@@ -1,5 +1,6 @@
 CFLAGS=-O3 -Wall -Wextra -Wcast-qual -DDEBUG
 CXXFLAGS=-O3 -Wall -Wextra  -Wno-c++11-extensions
+LDFLAGS=-lpthread
 
 all: deb juxt brogen brotli-02-edit.txt
 test: juxt
