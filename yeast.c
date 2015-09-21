@@ -1020,12 +1020,10 @@ local unsigned metablock(state_t *s)
         if (mlen) {
             if (mlen > s->len)
                 throw(2, "premature end of input");
-            trace(1, "meta-block with %zu bytes of metadata", mlen);
             s->len -= mlen;
             s->next += mlen;
         }
-        else
-            trace(1, "empty meta-block");
+        trace(1, "empty meta-block with %zu byte%s of metadata", PLURAL(mlen));
         trace(1, "end of %smeta-block", last ? "last " : "");
         return last;
     }
