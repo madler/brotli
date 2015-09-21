@@ -1009,8 +1009,6 @@ local unsigned metablock(state_t *s)
         mlen = n ? bits(s, n << 3) + 1 : 0;             /* MSKIPLEN */
         if (n > 1 & (mlen >> ((n - 1) << 3)) == 0)
             throw(3, "more metadata length bytes than needed");
-        if (last && n == 0)
-            throw(3, "last zero-length metadata instead of empty");
 
         /* discard any leftover bits to go to byte boundary */
         if (s->left && s->bits)
