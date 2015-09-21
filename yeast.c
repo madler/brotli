@@ -594,9 +594,6 @@ local void context_map(state_t *s, unsigned char *map, size_t len,
 
     /* get the code to read the map */
     rlemax = bits(s, 1) ? 1 + bits(s, 4) : 0;
-    if ((size_t)1 << rlemax > len)
-        throw(3, "rlemax of %u unnecessarily large for map length",
-              rlemax);
     trace(4, "%srun length code, rlemax = %u (max run %zu)",
           rlemax ? "" : "no ", rlemax, ((size_t)1 << (rlemax + 1)) - 1);
     trace(4, "context map code (%u+%u)", rlemax, trees);
