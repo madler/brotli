@@ -917,7 +917,7 @@ local size_t dict_word(unsigned char *dest, size_t copy, size_t id)
 
     if (copy > 24)
         throw(3, "static dictionary word length > 24");
-    if (copy < 4)               /* %% should this be allowed? */
+    if (copy < 4)
         throw(3, "static dictionary word length < 4");
 
     /* point to dictionary word and transform description */
