@@ -9,6 +9,9 @@
  * decoder.  It is a higher priority for this code be simple and readable than
  * to be fast.
  *
+ * This version implements the draft-alakuijala-brotli-05 version of the Brotli
+ * Compressed Data Format specification.
+ *
  * This code is intended to be compliant with the C99 standard, and portable.
  */
 
