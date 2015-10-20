@@ -9,101 +9,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include "load.h"
 #include "yeast.h"
 
-/* Load an entire file into a memory buffer.  load() returns 0 on success, in
-   which case it puts all of the file data in *dat[0..*len - 1].  That is,
-   unless *len is zero, in which case *dat is NULL.  *dat is allocated memory
-   which should be freed when done with it.  The error values are -1 for read
-   error or 1 for out of memory.  On error, *dat is NULL and *len is 0.  To
-   guard against bogging down the system with extremely large allocations, if
-   limit is not zero then load() will return an out of memory error if the
-   input is larger than limit. */
-static int load(FILE *in, unsigned char **dat, size_t *len, size_t limit)
+/* Load the file at path into memory, allocating new memory if *dat is NULL, or
+   reusing the allocation at *dat of size *size.  The length of the read data
+   is returned in *len.  load_file() returns zero on success, non-zero on
+   failure. */
+static int load_file(char *path, void **dat, size_t *size, size_t *len)
 {
-    size_t size = 1048576, have = 0, was;
-    unsigned char *buf = NULL, *mem;
-
-    *dat = NULL;
-    *len = 0;
-    if (limit == 0)
-        limit--;
-    if (size >= limit)
-        size = limit - 1;
-    do {
-        /* if we already saturated the size_t type or reached the limit, then
-           out of memory */
-        if (size == limit) {
-            free(buf);
-            return 1;
-        }
-
-        /* double size, saturating to the maximum size_t value */
-        was = size;
-        size <<= 1;
-        if (size < was || size > limit)
-            size = limit;
-
-        /* reallocate buf to the new size */
-        mem = realloc(buf, size);
-        if (mem == NULL) {
-            free(buf);
-            return 1;
-        }
-        buf = mem;
-
-        /* read as much as is available into the newly allocated space */
-        have += fread(buf + have, 1, size - have, in);
-
-        /* if we filled the space, make more space and try again until we don't
-           fill the space, indicating end of file */
-    } while (have == size);
-
-    /* if there was an error reading, discard the data and return an error */
-    if (ferror(in)) {
-        free(buf);
-        return -1;
-    }
-
-    /* if a zero-length file is read, return NULL for the data pointer */
-    if (have == 0) {
-        free(buf);
-        return 0;
-    }
-
-    /* resize the buffer to be just big enough to hold the data */
-    mem = realloc(buf, have);
-    if (mem != NULL)
-        buf = mem;
-
-    /* return the data */
-    *dat = buf;
-    *len = have;
-    return 0;
-}
-
-/* Load the file at path, returning a pointer to the data read and it's length
-   in *len.  If the returned pointer is NULL and *len is not zero, then the
-   load failed.  For a zero-length file, the returned pointer is NULL and *len
-   is 0. */
-static unsigned char *load_path (char *path, size_t *len)
-{
-    int ret = -1;
-    unsigned char *data = NULL;
-    FILE *in;
-
-    in = fopen(path, "rb");
-    if (in == NULL || (ret = load(in, &data, len, 0)) != 0) {
-        if (ret < 0)
-            fprintf(stderr, "error reading %s (%s)\n",
-                    path, strerror(errno));
-        else
-            fputs("out of memory\n", stderr);
-        *len = 1;
-    }
-    if (in != NULL)
+    int ret = 0;
+    FILE *in = fopen(path, "rb");
+    if (in == NULL)
+        ret = -1;
+    else {
+        ret = load(in, 0, dat, size, len);
         fclose(in);
-    return data;
+    }
+    if (ret)
+        fprintf(stderr, "could not load %s\n", path);
+    return ret;
 }
 
 /* Strip the extension off of a name in place.  Return 0 on success or -1 if
@@ -126,9 +51,9 @@ static int strip(char *path, int cut)
 int main(int argc, char **argv)
 {
     int ret;
-    unsigned char *compressed;
-    void *uncompressed;
-    size_t clen, ulen;
+    void *compressed = NULL;
+    void *uncompressed = NULL;
+    size_t csize, clen, usize, ulen;
 
 #ifdef DEBUG
     /* process verbosity option */
@@ -154,23 +79,19 @@ int main(int argc, char **argv)
             fprintf(stderr, "%s has no extension\n", *argv);
             continue;
         }
-        compressed = load_path(*argv, &clen);
-        if (compressed == NULL && clen)
+        if (load_file(*argv, &compressed, &csize, &clen))
             continue;
         strip(*argv, 1);
-        uncompressed = load_path(*argv, &ulen);
-        if (uncompressed == NULL && ulen) {
-            free(compressed);
+        if (load_file(*argv, &uncompressed, &usize, &ulen))
             continue;
-        }
         fprintf(stderr, "%s:\n", *argv);
         ret = yeast(&uncompressed, &ulen, compressed, &clen, 1);
         if (ret)
             fprintf(stderr, "yeast() returned %d\n", ret);
-        free(uncompressed);
-        free(compressed);
         if (argc > 1)
             putchar('\n');
     }
+    free(uncompressed);
+    free(compressed);
     return 0;
 }

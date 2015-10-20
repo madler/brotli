@@ -5,10 +5,11 @@ LDFLAGS=-lpthread
 all: deb juxt brogen brotli-02-edit.txt
 test: juxt
 	./juxt -v testdata/*.compressed
-deb: deb.o yeast.o try.o
-juxt: juxt.o yeast.o try.o
-deb.o: deb.c yeast.h
-juxt.o: juxt.c yeast.h
+deb: deb.o load.o yeast.o try.o
+juxt: juxt.o load.o yeast.o try.o
+deb.o: deb.c load.h yeast.h try.h
+juxt.o: juxt.c load.h yeast.h try.h
+load.o: load.c load.h
 yeast.o: yeast.c yeast.h xforms.h dict.h try.h
 try.o: try.c try.h
 brogen: brogen.o
