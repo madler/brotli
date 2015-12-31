@@ -76,7 +76,8 @@ const char help[] =
     "c id b s b s ... - Complex prefix code for symbols s with lengths b\n"
     "p id s s ... - Encode symbols using the prefix code id\n"
     "; - terminates a command (optional)\n"
-    "help; - Show this help\n";
+    "# - starts a comment (ignore the rest of the line)\n"
+    "help; - Show this help (semicolon makes it execute immediately)\n";
 
 // Return true if ch could be the first character of a natural number.
 int isnum(int ch) {
@@ -131,9 +132,9 @@ int getlong(long& val, long def = 0) {
 // that ends with a closing double quote.  The string may contain white space,
 // including new lines.  The string characters are each appended as a value to
 // the vector.
-vector<long> getlit() {
+vector<long> getlit(bool ok) {
     vector<long> vec;
-    for (;;) {
+    if (ok) for (;;) {
         cin >> ws;                      // skip whitespace
         long ch = cin.peek();           // peek at 1st character of next token
         if (isnum(ch)) {                // +, -, or digit
@@ -522,28 +523,43 @@ prefix_t complex(desc_t& desc) {
 // given on a line, and command parameters can be broken over several lines. As
 // a result, a command will not be executed until the next command or end of
 // file is encountered.  If desired, a semicolon can be used to complete a
-// command and execute it.
+// command and execute it.  A hash mark (#) starts a comment, which goes to the
+// end of that line.
 int main() {
     auto decode = commands();               // build map for command decoding
     map <long, prefix_t> codes;             // to save defined prefix codes
     long last = 0;                          // true for the last block
-    string token;
-    while (cin >> token) {
-        // discard any trailing semicolons, put one back on input
-        if (token.back() == ';') {
-            do {
-                token.pop_back();
-            } while (!token.empty() && token.back() == ';');
-            if (token.empty())
+    string token, rest;
+    while (token = rest, rest.resize(0), !token.empty() || cin >> token) {
+        // handle a start of comment (#) in the token
+        {
+            auto hash = token.find_first_of('#');
+            if (hash < token.size()) {
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                token.resize(hash);
+                if (token.empty())
+                    continue;
+            }
+        }
+
+        // handle semicolons in the token
+        {
+            if (token.front() == ';') {
+                rest = token.substr(1);
                 continue;
-            cin.putback(';');
+            }
+            auto semi = token.find_first_of(';');
+            if (semi < token.size()) {
+                rest = token.substr(semi);
+                token.resize(semi);
+            }
         }
 
         // get command (case-insenstive) and any parameters
         transform(token.begin(), token.end(), token.begin(), ::tolower);
         auto pos = decode.find(token);
         auto cmd = pos == decode.end() ? UNKNOWN : pos->second;
-        auto lit = getlit();
+        auto lit = getlit(rest.empty());    // don't bother if semicolon next
 
         // process command
         long p, q;                          // command parameters
