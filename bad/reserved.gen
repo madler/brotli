@@ -1,0 +1,2 @@
+# reserved bit in metadata block set
+w b 4 0xe

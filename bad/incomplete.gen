@@ -1,0 +1,11 @@
+# incomplete complex code
+w last m 6
+types 3     # five symbols
+b 2 2       # complex code, skip 2
+len 1       # len 3 (0)
+len 1       # len 4 (1)
+b 1 0       # all five symbols are three bits
+b 1 0
+b 1 0
+b 1 0
+b 1 0

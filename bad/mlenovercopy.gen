@@ -1,0 +1,16 @@
+# Request a longer copy than the remaining metablock size
+w last m 2          # metablock size 2
+types 1             # NBLTYPESL
+types 1             # NBLTYPESI
+types 1             # NBLTYPESD
+b 2 0 b 4 0         # NPOSTFIX = 0, NDIRECT = 0
+b 2 0               # context mode for the single literal block type
+types 1             # NTREESL
+types 1             # NTREESD
+s 0 1 8 0           # literal code with one symbol (0)
+s 1 1 10 136        # IaC code with one symbol (136)
+s 2 1 6 16          # one distance code (16)
+p 1 136             # insert 1 literal, copy 2 bytes
+p 0 0               # literal 0
+p 2 16              # distance 1 + 1 extra bit
+b 1 0               # distance 1

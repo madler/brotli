@@ -1,0 +1,2 @@
+# bits skipped to get to uncompressed data byte boundary are not all zeros
+w u bound 0x7f

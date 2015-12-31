@@ -1,0 +1,13 @@
+# context map run length too long
+w last m 6
+types 1         # NBLTYPESL
+types 1         # NBLTYPESI
+types 1         # NBLTYPESD
+b 2 0 b 4 2     # NPOSTFIX = 0, NDIRECT = 2
+b 2 0           # context mode for the single literal block type
+types 1         # NTREESL (no context map)
+types 2         # NTREESD (not 1 -- followed by context map)
+b 5 1           # RLEMAX = 1
+s 0 3 2 0 1 2   # codes for 0, repeat (1), 1 (2)
+p 0 1 b 1 1     # 3 zeros (ok so far -- there are four entries)
+p 0 1 b 1 1     # 3 zeros (whoops, too many)

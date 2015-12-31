@@ -1,0 +1,13 @@
+#!/bin/sh
+for x in bad/*
+do
+printf "%s - " $x
+./brogen < $x | ./deb -v 2>&1 | grep error
+done
+echo
+for x in good/*
+do
+echo $x
+./brogen < $x | ./deb -v 2>&1 | grep error
+done
+rm -f deb.out

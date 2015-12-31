@@ -1,0 +1,11 @@
+# premature end of input when decoding a prefix code
+w last m 6
+types 1
+types 1
+types 1
+b 2 0 b 4 2
+b 2 0
+b 1 0 b 1 0
+s 0 3 8 "abn"
+s 1 1 10 153
+s 2 1 7 17

@@ -1,0 +1,16 @@
+# Request a static dictionary word with a transform > 120
+w 10 last m 6       # window size = 1024 - 16 = 1008
+types 1             # NBLTYPESL
+types 1             # NBLTYPESI
+types 1             # NBLTYPESD
+b 2 0 b 4 0         # NPOSTFIX = 0, NDIRECT = 0
+b 2 0               # context mode for the single literal block type
+types 1             # NTREESL
+types 1             # NTREESD
+s 0 1 8 0           # literal code with one symbol (0), not used
+s 1 2 10 128 196    # IaC code with two symbols (128 and 196)
+s 2 1 6 35          # one distance code (35 -> 3069 + 0..1023)
+p 1 196             # insert 0 literals, copy 22 + 0..7 bytes
+b 3 2               # copy length 24
+p 2 35              # distance code 35 (nothing actually emitted)
+b 10 804            # gives distance 3873 == (121 << 5) + 1

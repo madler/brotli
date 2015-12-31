@@ -1,0 +1,2 @@
+# excess metadata length bytes (last byte all zeros)
+w b 22 0x26

@@ -1,0 +1,11 @@
+# too many repeats of last non-zero length (instruction 16)
+w last m 6
+types 3
+b 2 3       # complex code, skip 3
+len 0
+len 0
+len 0
+len 1       # instruction 16 (0)
+len 0
+len 1       # instruction 17 (1)
+b 1 0 b 2 3

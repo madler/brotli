@@ -1,0 +1,9 @@
+# oversubscribed complex code
+w last m 6
+types 3     # five symbols
+b 2 0       # complex code, skip 0
+len 1       # len 1 (0)
+len 1       # len 2 (1)
+b 1 1       # 2 bits
+b 1 0       # 1 bit
+b 1 0       # 1 bit

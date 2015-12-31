@@ -1,0 +1,2 @@
+# leftover bits in last byte at end of stream not all zero
+w e -1 bound 0x7f

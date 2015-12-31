@@ -1,0 +1,2 @@
+# shortest valid complete stream with a last empty block (one byte, 0x06)
+w e -1
