@@ -766,11 +766,11 @@ int main() {
                                 bout(code->second.first, code->second.second);
                             else
                                 cerr << "symbol " << sym <<
-                                "not found in code " << id << "\n";
+                                " not found in code " << id << "\n";
                         }
                     }
                     else
-                        cerr << "code " << id << "not found\n";
+                        cerr << "code " << id << " not found\n";
                 }
                 else
                     cerr << "invalid code id for p -- skipping\n";
