@@ -32,6 +32,7 @@ enum command {
     EMPTY,
     LIT,
     TYPES,
+    LEN,
     SIMPLE,
     COMPLEX,
     PREFIX,
@@ -51,6 +52,7 @@ map <string, enum command> commands() {
     m["e"] = EMPTY;
     m["lit"] = LIT;
     m["types"] = TYPES;
+    m["len"] = LEN;
     m["s"] = SIMPLE;
     m["c"] = COMPLEX;
     m["p"] = PREFIX;
@@ -71,6 +73,7 @@ const char help[] =
     "          which gives a last empty block with no metadata length\n"
     "lit x x ... - Literal data (numeric bytes and strings)\n"
     "types n (1) - Coded number of block types in 1..256\n"
+    "len n (0) - code length code (0..5 -> 2..4 bits)\n"
     "s id t a s s - Simple prefix code type t 1..5, symbols s s ...\n"
     "               alphabet bits a\n"
     "c id b s b s ... - Complex prefix code for symbols s with lengths b\n"
@@ -649,6 +652,18 @@ int main() {
                     bout(3, q);
                     if (q)
                         bout(q, p - 1 - (1 << q));
+                }
+                break;
+            case LEN:
+                if (getparm(lit, p, 0, 0, 5, "code length"))
+                    break;
+                switch (p) {
+                    case 0:  bout(2, 0);  break;
+                    case 1:  bout(4, 7);  break;
+                    case 2:  bout(3, 3);  break;
+                    case 3:  bout(2, 2);  break;
+                    case 4:  bout(2, 1);  break;
+                    case 5:  bout(4, 0xf);  break;
                 }
                 break;
             case SIMPLE: {
