@@ -1,0 +1,18 @@
+# The symbols in a simple code do not need to be sorted (but still result
+# in a canonical code by being sorted by the decoder)
+w last m 4
+types 1
+types 1
+types 1
+b 2 0 b 4 0
+b 2 0
+types 1
+types 1
+s 0 4 8 "cadb"      # four literals in scrambled order
+s 1 1 10 160        # single IaC symbol (160 -> insert 4, copy 2)
+s 2 1 6 0           # single distance symbol (0)
+p 1 160             # insert 4, copy 2 (nothing emitted)
+b 2 0               # four literals -- should be "abcd"
+b 2 2               # (bits are reversed)
+b 2 1
+b 2 3

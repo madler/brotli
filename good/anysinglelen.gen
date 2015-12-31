@@ -1,0 +1,102 @@
+# The single code in a complex code length code can have any length in 1..5
+w
+m 2
+types 1         # two literal block types
+types 1         # one IaC block type
+types 1         # one distance block type
+b 2 0 b 4 0     # 64 distance codes
+b 2 0           # context modes for the two literal block types
+types 1         # one literal code
+types 1         # one distance code
+b 2 0           # literal code: complex code, skip 0
+len 1 len 0     # only code length 1 is coded, with zero bits -- use 1
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+                # no bits for two length 1 codes for symbols 0 and 1
+s 3 1 10 144    # single IaC symbol (144 -> insert 2, copy 2)
+s 4 1 6 0       # single distance symbol (0)
+p 3 144         # insert 2
+b 1 0           # code for literal 0
+b 1 1           # code for literal 1
+m 2
+types 1         # two literal block types
+types 1         # one IaC block type
+types 1         # one distance block type
+b 2 0 b 4 0     # 64 distance codes
+b 2 0           # context modes for the two literal block types
+types 1         # one literal code
+types 1         # one distance code
+b 2 0           # literal code: complex code, skip 0
+len 2 len 0     # only code length 1 is coded, with zero bits -- use 2
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+                # no bits for two length 1 codes for symbols 0 and 1
+s 3 1 10 144    # single IaC symbol (144 -> insert 2, copy 2)
+s 4 1 6 0       # single distance symbol (0)
+p 3 144         # insert 2
+b 1 0           # code for literal 0
+b 1 1           # code for literal 1
+m 2
+types 1         # two literal block types
+types 1         # one IaC block type
+types 1         # one distance block type
+b 2 0 b 4 0     # 64 distance codes
+b 2 0           # context modes for the two literal block types
+types 1         # one literal code
+types 1         # one distance code
+b 2 0           # literal code: complex code, skip 0
+len 3 len 0     # only code length 1 is coded, with zero bits -- use 3
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+                # no bits for two length 1 codes for symbols 0 and 1
+s 3 1 10 144    # single IaC symbol (144 -> insert 2, copy 2)
+s 4 1 6 0       # single distance symbol (0)
+p 3 144         # insert 2
+b 1 0           # code for literal 0
+b 1 1           # code for literal 1
+m 2
+types 1         # two literal block types
+types 1         # one IaC block type
+types 1         # one distance block type
+b 2 0 b 4 0     # 64 distance codes
+b 2 0           # context modes for the two literal block types
+types 1         # one literal code
+types 1         # one distance code
+b 2 0           # literal code: complex code, skip 0
+len 4 len 0     # only code length 1 is coded, with zero bits -- use 4
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+                # no bits for two length 1 codes for symbols 0 and 1
+s 3 1 10 144    # single IaC symbol (144 -> insert 2, copy 2)
+s 4 1 6 0       # single distance symbol (0)
+p 3 144         # insert 2
+b 1 0           # code for literal 0
+b 1 1           # code for literal 1
+last m 2
+types 1         # two literal block types
+types 1         # one IaC block type
+types 1         # one distance block type
+b 2 0 b 4 0     # 64 distance codes
+b 2 0           # context modes for the two literal block types
+types 1         # one literal code
+types 1         # one distance code
+b 2 0           # literal code: complex code, skip 0
+len 5 len 0     # only code length 1 is coded, with zero bits -- use 5
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+len 0 len 0 len 0 len 0
+                # no bits for two length 1 codes for symbols 0 and 1
+s 3 1 10 144    # single IaC symbol (144 -> insert 2, copy 2)
+s 4 1 6 0       # single distance symbol (0)
+p 3 144         # insert 2
+b 1 0           # code for literal 0
+b 1 1           # code for literal 1

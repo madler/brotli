@@ -1,0 +1,17 @@
+# A block count that does not count down to zero at the end is allowed.
+w last m 1
+types 2         # two literal block types
+s 0 1 2 1       # single block type code 1 (increment to next block type)
+s 1 1 5 0       # single block length code 0 (1 + 0..3)
+p 1 0 b 2 3     # block length of 4
+types 1         # one IaC block type
+types 1         # one distance block type
+b 2 0 b 4 0     # 64 distance codes
+b 2 0 b 2 0     # context modes for the two literal block types
+types 1         # one literal code
+types 1         # one distance code
+s 2 1 8 "a"     # single literal symbol ("a")
+s 3 1 10 136    # single IaC symbol (136 -> insert 1, copy 2)
+s 4 1 6 0       # single distance symbol (0)
+p 3 136         # insert 1
+p 2 "a"         # code for "a" (no bits)
