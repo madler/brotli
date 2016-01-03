@@ -1,0 +1,347 @@
+Brotli .br Framing Format Description Version 1
+
+The purpose of the .br framing format is to provide a means to wrap brotli
+streams with an identifying structure in a manner that is streamable when
+compressing and decompressing, to check uncompressed data integrity, to provide
+meta-data on the contents, and to embed independently generated brotli streams.
+This document describes the .br framing format.
+
+
+Basic .br structure (- is mandatory, * is optional, indenting notes structure):
+
+- signature
+- header
+  * modification time
+  * file name
+  * user-defined extra data
+- compressed brotli stream
+- check value
+* repetitions of:
+  - header
+    * user-defined extra data
+    * offset to previous header
+  - compressed brotli stream
+  - check value
+  * uncompressed length of stream
+- trailer
+  * check value of check values
+  * total uncompressed length
+  * offset to last header
+
+.br streams intended for storage on seekable media should contain both offsets
+to previous headers and the uncompressed data length in the trailer, as well as
+those items in the intermediate headers.  .br streams intended for transmission
+and immediate decompression should not have those optional items.  (Note that
+in this document, "should" designates a recommended practice, but is not
+required by the format.)
+
+The offsets to previous headers facilitate the construction and deconstruction
+of .br streams without having to decompress the data, to assist in parallel
+compression and decompression, as well as other applications such as logging
+and random access.
+
+Note that individual brotli streams may themselves contain information to
+facilitate parallel decompression and random access.  Those conventions are not
+described in this document, but their presence may be flagged by the optional
+compression method and constraints information in each header.
+
+A final check value of check values in the trailer should not be present if
+there is only one brotli stream.  A final check value should be present if
+there is more than one brotli stream embedded in the .br stream.
+
+Note that neither a modification time nor file name are permitted in
+intermediate headers.  They are only permitted in the first header.  .br is not
+intended to be a substitute for a comprehensive archive format.  Normally an
+uncompressed archive, e.g. a .tar file, would be compressed in its entirety
+into a single .br stream to make a .tar.br file.
+
+
+We will now go to the next level of detail, describing each of the components.
+
+
+Signature in hexadecimal (four bytes):
+
+ce b2 cf 81
+
+
+Header structure (length in bytes in parentheses, v = variable, with the "v",
+"v+" and "v<>" notations described later):
+
+- content mask (1)
+* check value id (1)
+* extra mask (1)
+  * modification time (v) - only in the first header
+  * file name (v+) - only in the first header
+  * extra field (v+)
+  * compression mask (1) - compression method and constraints
+  * offset to previous header (v) - not permitted on first header
+  * header check value (2)
+
+The offset to the previous header is a positive value that is relative to the
+start of this header or trailer (the content mask byte), and is the offset to
+the preceding header.  This offset can also be viewed as the length of the
+preceding portion of the .br stream from the header through the compressed data
+check value, inclusively.
+
+
+Compressed brotli stream:
+
+A single, complete brotli stream as documented in the RFC, version 08 or later.
+A brotli stream is self-terminating, which is required for the parsing of this
+format.  A single, complete brotli stream has a last metablock to signal the
+end of the stream.
+
+
+Check value:
+
+The mandatory check value on each brotli stream is one of these, where lengths
+of 1 or 2 use the least-significant bytes of the check value.
+
+- XXH32 (1, 2, or 4)
+- XXH64 (8)
+- CRC-32C (1, 2, or 4)
+- SHA-256 (32)
+
+The check values are stored in the stream in little-endian order.
+
+The default check value should be XXH64.  Special applications may select other
+check values for speed, e.g. XXH32 on 32-bit machines or CRC-32C on machines
+with a crc32 instruction.  Or they may select shorter check values, down to one
+byte, for short streams in order to minimize overhead.  For the very lowest
+probability of false positives, a SHA-256 check value may be used, e.g. for
+very long streams or high reliability applications.  The final check value, if
+present, cannot be a SHA-256.
+
+Note that the presence of a SHA-256 in the same stream as the data cannot be
+considered any protection against malicious changes to the data, which is the
+usual application of such cryptographic hashes.  The SHA-256 would simply be
+updated by the adversary to correspond to the malicious content.  SHA-256 was
+chosen here due its length, hash quality, and standardization.
+
+
+Trailer structure:
+
+- content mask (1)
+  * check value of check values
+  * total uncompressed length (v<>)
+  * offset to last header (v<>)
+  - repeat of content mask if any of the above are present (1)
+
+The check value of check values is the requested check value of the individual
+check values from the stream in order as a string of bytes, with each check
+value in little-endian order.  Note that the check values in the stream, as
+well as the final check value, may all be of differing types.
+
+
+Now we will cover the final layer of detail at the byte and bit level.
+
+
+Content mask:
+
+This is the first byte of every header and the first byte of the trailer, as
+well as the last byte of the trailer if any of the optional trailer contents
+are present.
+
+The bits are presented in order from least significant to most significant.
+"is present" means present if the bit is 1, not present if the bit is 0.
+
+3 bits: check value 0..7 (mask & 7) -- meaning differs in header and trailer
+1 bit: uncompressed length is present
+1 bit: offset to previous header is present (cannot be 1 in first header)
+1 bit: 0 = header, 1 = trailer
+1 bit: extra mask is present (must be 0 if trailer)
+1 bit: parity (the entire byte must have parity zero)
+
+The check values are:
+0: XXH32 (1)
+1: XXH32 (2)
+2: XXH32 (4)
+3: XXH64 (8)
+4: CRC-32C (1)
+5: CRC-32C (2)
+6: CRC-32C (4)
+7: if header, the content mask is followed by a check value id byte
+7: if trailer, then the check value of check values is not present
+
+
+Check value id:
+
+0: SHA-256
+1..255 reserved for future expansion
+
+
+Extra mask:
+
+This byte is present only in a header, and follows the content mask and
+optional check value id byte.
+
+1 bit: modification time is present
+1 bit: file name is present
+1 bit: extra field is present
+1 bit: 0 (for future expansion)
+1 bit: 0 (for future expansion)
+1 bit: final 2-byte XXH32 check of the header is present
+1 bit: compression mask is present
+1 bit: parity (the entire byte must have parity zero)
+
+The modification time is the number of seconds since the start of 1970 TAI,
+including leap seconds.  The value can be negative for times before 1970.  See
+below for the special encoding of this time.
+
+The file name is a sequence of bytes that are a valid and complete UTF-8
+string.  The file name is not terminated with a zero, and embedded zero bytes
+(nulls) are not permitted either.  A null in the name must be encoded as a
+two-byte UTF-8 character (this encoding is referred to as "modified UTF-8").
+
+The extra field is a sequence of bytes with its own required internal
+structure.  That structure is:
+
+* repetitions of:
+  - block id (v)
+  - block data (v+)
+
+Block id's 0..63 are reserved for future use by this specification. id's 64 and
+greater are for user applications.
+
+The two-byte header check, if present, is for the entire header except for
+itself, and immediately precedes the compressed data.
+
+
+Compression mask:
+
+This byte is present only in a header, and follows any items called for in the
+extra mask, except for the header check.
+
+3 bits: compression method (mask & 7)
+3 bits: compression constraints ((mask & 7) >> 3)
+1 bit: 0 (for future expansion)
+1 bit: parity (the entire byte must have parity zero)
+
+The only defined value for the compression method in this specification is 0
+for brotli.  The other values may be used in a future version of this
+specification for incompatible variants of brotli or other compression methods.
+
+The 3-bit compression constraints for method 0 (brotli) are:
+
+<tentative>
+1 bit: metablocks in the stream are marked for independent access
+1 bit: 0 (for future expansion)
+1 bit: 0 (for future expansion)
+</tentative>
+
+It must always be possible to ignore compression constraints when decompressing
+the data.  If this byte is present, only the method would need to be checked in
+order to engage the appropriate decompressor.  Constraints that are noted in
+the compression mask must be obeyed by the following compressed data.
+
+
+Variable lengths:
+
+Three different kinds of variable-length sections are used, denoted above
+cryptically in the format descriptions as "v", "v+" and "v<>".
+
+v:
+
+This is a variable-length unsigned integer.  Each byte has a high-bit of 0,
+except for the last byte, which has a high-bit of 1.  Each byte has 7 bits of
+the integer, stored in little-endian order.  So the first byte has the low 7
+bits, the next byte (if present), has the next-most-significant 7 bits, and so
+on.  A single-byte length is permitted, encoding 0..127 with the high bit set.
+
+This is used in headers for the modification time, offsets to previous headers,
+and uncompressed lengths, as well as for extra field id's.
+
+In the case of the modification time, the variable-length unsigned integer is
+specially processed to convert it to a time value.  The modification time
+should be considered as a TAI-64 timescale value, which is a 64-bit value less
+than 2**63 where 2**62 is the second at the start of 1970 TAI.  (Note that the
+TAI-64 format is _not_ used, which is a fixed-length sequence of eight bytes in
+big-endian order.)  TAI-64 has the property that all seconds exist in the
+representation, and that subtracting TAI-64 values gives the actual number of
+seconds between them.
+
+To convert the decoded unsigned integer to a TAI-64 timescale, the low-bit of
+the unsigned integer determines if the time is before or after 1970, in order
+to minimize the size of the modification time in the stream.  The pseudo code
+below converts the unsigned integer to a TAI-64 timescale value:
+
+    uint64_t n = get_variable_integer_from(stream);
+    uint64_t tai64 = n & 1 ?
+                     ((uint64_t)1 << 62) - 1 - (n >> 1) :
+                     ((uint64_t)1 << 62) + (n >> 1);
+
+With a table of leap seconds, the TAI64 times can be converted into a Unix or
+UTC time, as well as vice-versa.
+
+v+:
+
+This is the same variable-length integer as "v", followed by that many bytes of
+data.  This is used in headers for the file name and the extra field, as well
+as for data blocks in the extra field.
+
+v<>:
+
+This is a bidirectional variable-length unsigned integer used only in the
+trailer for the total uncompressed length and the offset to the last header.
+This length consists of at least two bytes with the high bit of the first and
+last byte being 1, and the the high bit of the middle bytes being 0.  This
+permits reading the integer either forward or backward, which is needed when
+parsing a .br file from the end to find the last header. Just like for "v", the
+7-bits in each byte are in little-endian order (when reading in the forward
+direction).
+
+
+Compliance:
+
+A compliant decompressor need only decompress the compressed data.  It is not
+required to consider the provided meta-data, such as the time, name, or extra
+field.  The decompressor must however be able to recognize their presence and
+skip over them and other optional items in order to find the compressed data.
+
+A complaint decompressor must fail if the format here is violated, which
+includes the signature, bits marked zero that are not zero, other reserved
+values, incorrect parity bits, and header check values that do not check out.
+The exception is that the content of optional data fields do not need to be
+checked.  The modification time does not need to be checked for values that
+meet the TAI-64 specification.  The file name does not need to be checked for
+valid UTF-8 or for no embedded nulls.  Extra fields do not need to be checked
+for the internal extra field structure if extra field data is not being used.
+However if the decompressor is using data from the extra field, then the entire
+extra field must be checked for the proper structure, with decompression
+failing if it does not.
+
+A compliant decompressor must fail if the compressed data is not valid or if
+the compressed data check values do not check out, including the final check
+value if present.  All check value types from 0..6 must be supported by a
+compliant decompressor.  The SHA-256 check value, or other extension check
+values that may be added to this specification later, do not have to be
+supported by a compliant decompressor.  If an unsupported check value is
+encountered by a compliant decompressor, it must fail, noting the reason and
+the id number of the unsupported check value.
+
+A compliant decompressor must fail if any uncompressed data lengths do not
+match the decompressed data size, including the final total length if present.
+
+A compliant decompressor must fail if any offsets to previous headers are not
+correct.
+
+If all of the format requirements are met, a compliant decompressor must
+succeed!
+
+A compliant compressor must be able to produce a stream that is decompressible
+by a compliant decompressor.  As a result, it does not need to support all of
+the features of the format.  For example, a minimal compliant compressor may
+only support one check value type and be incapable of inserting any optional
+format contents.
+
+
+Shortest .br stream:
+
+The shortest valid and complete .br stream with brotli compressed data is eight
+bytes.  This sort of minimal-length use of the format would be appropriate for
+transmission.  Here is an example in hexadecimal:
+
+ce b2 cf 81 14 06 00 27
+
+This consists of four signature bytes, one header byte, one compressed data
+byte, and one trailer byte.  It decompresses to zero bytes.
