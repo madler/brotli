@@ -1,6 +1,6 @@
 /* try.h -- try / catch / throw exception handling for C99
-  Copyright (C) 2013, 2015 Mark Adler
-  Version 1.3  1 March 2015
+  Copyright (C) 2013, 2015, 2016 Mark Adler
+  Version 1.4  2 January 2016
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the author be held liable for any damages
@@ -29,6 +29,7 @@
                           to printf()
     1.2   19 Jan 2015   - Obey setjmp() invocation limits from C standard
     1.3    1 Mar 2015   - Add preserve to avoid use of volatile, remove retry
+    1.4    2 Jan 2016   - Add no-return attribute to throw()
  */
 
 /* To use, include try.h in all source files that use these operations, and
@@ -488,7 +489,12 @@ struct try_s_ {
    to make use of any arguments after the 0 anyway.
 
    try.c must be compiled and linked to provide the try_throw_() function. */
-void try_throw_(int code, char *fmt, ...);
+void try_throw_(int code, char *fmt, ...)
+#if defined(__GNUC__) || defined(__has_builtin)
+                                                __attribute__((noreturn))
+#endif
+    ;
+
 #define TRY_THROW_(...) try_throw_(__VA_ARGS__, NULL)
 
 /* Punt a caught error on to the next enclosing catcher.  This is normally used
