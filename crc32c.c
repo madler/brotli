@@ -335,7 +335,7 @@ uint32_t crc32c_sw_little(uint32_t crc, void const *buf, size_t len) {
 
 /* Swap the bytes in a uint64_t.  (Only for big-endian.) */
 #if defined(__has_builtin) || (defined(__GNUC__) && \
-(__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3)))
+    (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3)))
 #  define swap __builtin_bswap64
 #else
 static inline uint64_t swap(uint64_t x) {

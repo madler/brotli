@@ -1,3 +1,7 @@
+// crc32c.h -- header for crc32c.c
+// Copyright (C) 2015 Mark Adler
+// See crc32c.c for the license.
+
 #include <stdint.h>
 
 // Return the CRC-32C of buf[0..len-1] given the starting CRC crc.  This can be
