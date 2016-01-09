@@ -341,7 +341,7 @@ The shortest valid and complete .br stream with brotli compressed data is eight
 bytes.  This sort of minimal-length use of the format would be appropriate for
 transmission.  Here is an example in hexadecimal:
 
-ce b2 cf 81 14 06 00 27
+ce b2 cf 81 84 06 00 27
 
 This consists of four signature bytes, one header byte, one compressed data
-byte, and one trailer byte.  It decompresses to zero bytes.
+byte, one check byte, and one trailer byte.  It decompresses to zero bytes.
