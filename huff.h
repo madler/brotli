@@ -1,3 +1,6 @@
+// huff.h -- header for huff.c
+// Written by Mark Adler, placed into the public domain in 2015.
+
 #ifdef __cplusplus
 extern "C" {
 #endif

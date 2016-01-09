@@ -1,3 +1,12 @@
+// huff.c -- calculate a Huffman code from a set of sorted frequencies,
+// permitting an in-place calculation.
+//
+// This algorithm is from "In-Place Calculation of Minimum-Redundancy Codes",
+// by Alistair Moffat and Jyrki Katajainen, 1995.  The code here is derived
+// from their implementation, which was provided with no copyright (see
+// http://people.eng.unimelb.edu.au/ammoffat/inplace.c ).  Modifications by
+// Mark Adler placed into the public domain in 2015.
+
 #include "huff.h"
 
 // See description in huff.h.  This algorithm is due to Alistair Moffat and
