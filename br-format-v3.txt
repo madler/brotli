@@ -1,4 +1,4 @@
-Brotli .br Framing Format Description Version 1
+Brotli .br Framing Format Description Version 3
 
 The purpose of the .br framing format is to provide a means to wrap brotli
 streams with an identifying structure in a manner that is streamable when
@@ -7,38 +7,44 @@ meta-data on the contents, and to embed independently generated brotli streams.
 This document describes the .br framing format.
 
 
-Basic .br structure (- is mandatory, * is optional, indenting notes structure):
+Basic .br structure, where the ordering and indentation indicates the
+structure, - is mandatory at that level, ? is optional occurring 0 or 1 times,
+and * is repeated 0 or more times:
 
 - signature
-- header
-  * modification time
-  * file name
-  * user-defined extra data
-- compressed brotli stream
-- check value
-* repetitions of:
+? compressed data segment
   - header
-    * user-defined extra data
-    * offset to previous header
+    ? modification time
+    ? file name
+    ? user-defined extra data
   - compressed brotli stream
-  - check value
-  * uncompressed length of stream
+  ? uncompressed length of brotli stream
+  - check value on uncompressed data
+  * intermediate compressed data segments
+    - header
+      ? offset to previous header
+      ? user-defined extra data
+    - compressed brotli stream
+    ? uncompressed length of brotli stream
+    - check value on uncompressed data
 - trailer
-  * check value of check values
-  * total uncompressed length
-  * offset to last header
+  ? offset to last header
+  ? total uncompressed length
+  ? check value of check values
 
-.br streams intended for storage on seekable media should contain both offsets
-to previous headers and the uncompressed data length in the trailer, as well as
-those items in the intermediate headers.  .br streams intended for transmission
-and immediate decompression should not have those optional items.  (Note that
-in this document, "should" designates a recommended practice, but is not
+.br streams intended for storage on seekable media should contain offsets to
+previous headers in the intermediate headers as well as the trailer, the total
+uncompressed length in the trailer, and the check value of check values in the
+trailer if intermediate brotli streams are present.  .br streams intended for
+transmission and immediate decompression should not have those optional items.
+(In this document, "should" designates a recommended practice, but is not
 required by the format.)
 
 The offsets to previous headers facilitate the construction and deconstruction
 of .br streams without having to decompress the data, to assist in parallel
 compression and decompression, as well as other applications such as logging
-and random access.
+and random access.  The first header cannot have an offset to the previous
+header, since there isn't one.
 
 Note that individual brotli streams may themselves contain information to
 facilitate parallel decompression and random access.  Those conventions are not
@@ -55,6 +61,51 @@ intended to be a substitute for a comprehensive archive format.  Normally an
 uncompressed archive, e.g. a .tar file, would be compressed in its entirety
 into a single .br stream to make a .tar.br file.
 
+A stream with all optional items removed is just a signature and a trailer, and
+is valid.  That would be:
+
+- signature
+- trailer
+
+A minimal stream with compressed brotli data, suitable for transmission, would
+be:
+
+- signature
+- compressed data segment
+  - header
+  - compressed brotli stream
+  - check value on uncompressed data
+- trailer
+
+A minimal stream as recommended for storage on seekable media would be:
+
+- signature
+- compressed data segment
+  - header
+  - compressed brotli stream
+  - check value on uncompressed data
+- trailer
+  - offset to last header
+  - total uncompressed length
+
+A minimal stream with two embedded brotli streams as recommended for storage on
+seekable media would be:
+
+- signature
+- compressed data segment
+  - header
+  - compressed brotli stream
+  - check value on uncompressed data
+  - intermediate compressed data segment
+    - header
+      - offset to previous header
+    - compressed brotli stream
+    - check value on uncompressed data
+- trailer
+  - offset to last header
+  - total uncompressed length
+  - check value of check values
+
 
 We will now go to the next level of detail, describing each of the components.
 
@@ -68,14 +119,14 @@ Header structure (length in bytes in parentheses, v = variable, with the "v",
 "v+" and "v<>" notations described later):
 
 - content mask (1)
-* check value id (1)
-* extra mask (1)
-  * modification time (v) - only in the first header
-  * file name (v+) - only in the first header
-  * extra field (v+)
-  * compression mask (1) - compression method and constraints
-  * offset to previous header (v) - not permitted on first header
-  * header check value (2)
+? offset to previous header (v) - not permitted on first header
+? check value id (1)
+? extra mask (1)
+  ? modification time (v) - only in the first header
+  ? file name (v+) - only in the first header
+  ? extra field (v+)
+  ? compression mask (1) - compression method and constraints
+  ? header check value (2) - covers back to and including content mask
 
 The offset to the previous header is a positive value that is relative to the
 start of this header or trailer (the content mask byte), and is the offset to
@@ -92,10 +143,17 @@ format.  A single, complete brotli stream has a last metablock to signal the
 end of the stream.
 
 
+Uncompressed length of brotli stream (v):
+
+An optional variable length integer that is the length of the uncompressed data
+generated by the immediately preceding brotli stream.
+
+
 Check value:
 
-The mandatory check value on each brotli stream is one of these, where lengths
-of 1 or 2 use the least-significant bytes of the check value.
+A mandatory check value on the uncompressed data generated by the preceding
+brotli stream.  It is one of these, where lengths of 1 or 2 use the least
+significant bytes of the check value:
 
 - XXH32 (1, 2, or 4)
 - XXH64 (8)
@@ -122,15 +180,25 @@ chosen here due its length, hash quality, and standardization.
 Trailer structure:
 
 - content mask (1)
-  * check value of check values
-  * total uncompressed length (v<>)
-  * offset to last header (v<>)
-  - repeat of content mask if any of the above are present (1)
+  ? offset to last header (v<>)
+  ? total uncompressed length (v<>)
+  ? check value of check values
+  ? content mask repeated if and only if any of the above three are present (1)
 
-The check value of check values is the requested check value of the individual
-check values from the stream in order as a string of bytes, with each check
-value in little-endian order.  Note that the check values in the stream, as
-well as the final check value, may all be of differing types.
+The total uncompressed length is the sum of the uncompressed lengths of the
+embedded brotli streams.
+
+The check value of check values is the check value of the identified type taken
+over the individual check values from the stream in order as a string of bytes,
+with each check value in little-endian order in the string.  Note that the
+check values in the stream, as well as the final check value, may all be of
+differing types.  The check value type identified in the trailer cannot be
+SHA-256 or any other extended type as would be identified by a check ID in a
+header.
+
+The final repeat of the content mask must be present if any of the three
+optional items that precede it are present in the trailer.  It must not be
+present if none of the optional items are present.
 
 
 Now we will cover the final layer of detail at the byte and bit level.
@@ -146,8 +214,8 @@ The bits are presented in order from least significant to most significant.
 "is present" means present if the bit is 1, not present if the bit is 0.
 
 3 bits: check value 0..7 (mask & 7) -- meaning differs in header and trailer
-1 bit: uncompressed length is present
-1 bit: offset to previous header is present (cannot be 1 in first header)
+1 bit: uncompressed length is present, following brotli stream
+1 bit: offset to previous header is present (not allowed in first header)
 1 bit: 0 = header, 1 = trailer
 1 bit: extra mask is present (must be 0 if trailer)
 1 bit: parity (the entire byte must have parity zero)
@@ -172,11 +240,11 @@ Check value id:
 
 Extra mask:
 
-This byte is present only in a header, and follows the content mask and
-optional check value id byte.
+This byte is present only in a header, and follows the content mask, optional
+offset, and optional check value id byte.
 
-1 bit: modification time is present
-1 bit: file name is present
+1 bit: modification time is present (allowed only in first header)
+1 bit: file name is present (allowed only in first header)
 1 bit: extra field is present
 1 bit: 0 (for future expansion)
 1 bit: 0 (for future expansion)
@@ -191,7 +259,8 @@ below for the special encoding of this time.
 The file name is a sequence of bytes that are a valid and complete UTF-8
 string.  The file name is not terminated with a zero, and embedded zero bytes
 (nulls) are not permitted either.  A null in the name must be encoded as a
-two-byte UTF-8 character (this encoding is referred to as "modified UTF-8").
+two-byte UTF-8 character (referred to as "modified UTF-8").  A zero-length file
+name is permitted.
 
 The extra field is a sequence of bytes with its own required internal
 structure.  That structure is:
@@ -200,11 +269,13 @@ structure.  That structure is:
   - block id (v)
   - block data (v+)
 
+A zero-length extra field is permitted.
+
 Block id's 0..63 are reserved for future use by this specification. id's 64 and
 greater are for user applications.
 
-The two-byte header check, if present, is for the entire header except for
-itself, and immediately precedes the compressed data.
+The two-byte header check, if present, is calculated over the entire header
+except for itself, and immediately precedes the compressed data.
 
 
 Compression mask:
@@ -345,3 +416,9 @@ ce b2 cf 81 84 06 00 27
 
 This consists of four signature bytes, one header byte, one compressed data
 byte, one check byte, and one trailer byte.  It decompresses to zero bytes.
+
+The shortest valid and complete .br stream period is five bytes long, has no
+brotli compressed data, no header, and ends immediately with a trailer.  That
+stream in hexadecimal is:
+
+ce b2 cf 81 27
