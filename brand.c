@@ -216,7 +216,7 @@ local void wrap(void const *brotli, size_t len, void const *un, size_t got,
         unsigned extra = 0;
         if (mod)
             extra |= BR_EXTRA_MOD;
-        if (name)
+        if (file)
             extra |= BR_EXTRA_NAME;
         putc(extra ^ parity(extra), out);           // write extra mask byte
         writ++;
