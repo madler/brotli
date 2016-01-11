@@ -220,10 +220,11 @@ local void wrap(void const *brotli, size_t len, void const *un, size_t got,
             extra |= BR_EXTRA_NAME;
         putc(extra ^ parity(extra), out);           // write extra mask byte
         writ++;
-        if (mod) {
-            writ += var(time(NULL), out);
-        }
-        if (file) {
+        if (mod)                                    // write mod time
+            // add 35 seconds for TAI-UTC as of this writing -- need a table of
+            // leap seconds to do this right, in case there are more added
+            writ += var(((uintmax_t)time(NULL) + 35) << 1, out);
+        if (file) {                                 // write file name
             size_t len = strlen(name);
             writ += var(len, out);
             fwrite(name, 1, len, out);
