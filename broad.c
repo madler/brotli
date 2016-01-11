@@ -139,7 +139,7 @@ local inline unsigned parity(unsigned n) {
 }
 
 // Process framed brotli input from in, writing decompressed data to out.
-int broad(FILE *in, FILE *out) {
+int broad(FILE *in, FILE *out, int verbose, int write) {
     ball_t err;
     seq_t seq;
     seq_init(&seq);
@@ -173,26 +173,49 @@ int broad(FILE *in, FILE *out) {
                 break;
             if (last == 0 && (mask & BR_CONTENT_OFF))
                 throw(3, "invalid format -- reverse offset in first header");
-            if (mask & BR_CONTENT_OFF)          // reverse offset
+            if (verbose)
+                fputs("header\n", stderr);
+            if (mask & BR_CONTENT_OFF) {        // reverse offset
                 if (curr - last != getvar(&seq))
                     throw(3, "invalid format -- incorrect reverse offset");
+                if (verbose)
+                    fprintf(stderr, "  offset %ju to previous header\n",
+                            curr - last);
+            }
             if ((mask & BR_CONTENT_CHECK) == BR_CHECK_ID) {
                 unsigned id = get1(&seq);       // check id
                 if (id != BR_CHECKID_SHA256)    // only SHA256 defined for now
                     throw(3, "invalid format -- unknown check id");
+                if (verbose)
+                    fprintf(stderr, "  check id %u\n", id);
             }
             if (mask & BR_CONTENT_EXTRA_MASK) {
                 unsigned extra = get1(&seq);    // extra mask
                 if (parity(extra) || (extra & BR_EXTRA_RESERVED))
                     throw(3, "invalid format -- extra parity");
-                if (extra & BR_EXTRA_MOD)       // modified time (discard)
-                    getvar(&seq);
+                if (verbose)
+                    fputs( "  extra\n", stderr);
+                if (extra & BR_EXTRA_MOD) {     // modified time (discard)
+                    time_t mod = getvar(&seq);
+                    if (verbose) {
+                        mod = mod & 1 ? -(mod >> 1) - 35 : (mod >> 1) - 35;
+                        fprintf(stderr, "    modification time %s",
+                                ctime(&mod));
+                    }
+                }
                 if (extra & BR_EXTRA_NAME) {    // file name (discard)
                     uintmax_t n = getvar(&seq);
                     skip(&seq, n, 1);
+                    if (verbose) {
+                        fputs("    name ", stderr);
+                        fwrite(seq.buf + seq.next - n, 1, n, stderr);
+                        putc('\n', stderr);
+                    }
                 }
                 if (extra & BR_EXTRA_EXTRA) {   // extra field (discard)
                     uintmax_t n = getvar(&seq);
+                    if (verbose)
+                        fprintf(stderr, "    extra field of %ju bytes\n", n);
                     skip(&seq, n, 1);
                 }
                 if (extra & BR_EXTRA_COMPRESSION_MASK) {    // method mask
@@ -201,11 +224,16 @@ int broad(FILE *in, FILE *out) {
                         (method & (BR_COMPRESSION_METHOD |  // only 0 defined
                                    BR_COMPRESSION_RESERVED)))
                         throw(3, "invalid format -- method parity");
+                    if (verbose)
+                        fprintf(stderr, "    method %u, constraints %u\n",
+                                method & 7, (method >> 3) & 7);
                 }
                 if (extra & BR_EXTRA_CHECK) {       // header check
                     unsigned check = XXH32_digest(&seq.check) & 0xffff;
                     if (check != getn(&seq, 2))
                         throw(3, "invalid format -- header check mismatch");
+                    if (verbose)
+                        fprintf(stderr, "    header check 0x%04x\n", check);
                 }
             }
 
@@ -219,6 +247,10 @@ int broad(FILE *in, FILE *out) {
             try {
                 if (ret)
                     throw(4, "invalid compressed data");
+                if (verbose)
+                    fprintf(stderr,
+                            "  brotli %ju compressed, %ju uncompressed\n",
+                            used, got);
 
                 // compare uncompressed length with stream
                 if (mask & BR_CONTENT_LEN) {
@@ -235,6 +267,12 @@ int broad(FILE *in, FILE *out) {
                     skip(&seq, n, 0);
                     if (memcmp(sha, seq.buf + seq.next - n, n))
                         throw(5, "uncompressed check mismatch (SHA-256)");
+                    if (verbose) {
+                        fputs("  SHA-256 0x", stderr);
+                        for (unsigned k = 0; k < n; k++)
+                            fprintf(stderr, "%02x", sha[k]);
+                        putc('\n', stderr);
+                    }
                 }
                 else {
                     uintmax_t check =
@@ -246,13 +284,21 @@ int broad(FILE *in, FILE *out) {
                         check &= n == 2 ? 0xffff : 0xff;
                     if (check != getn(&seq, n))
                         throw(5, "uncompressed check mismatch");
+                    if (verbose)
+                        fprintf(stderr, "  %s %0*jx\n",
+                                (mask & BR_CONTENT_CHECK) >= 4 ? "CRC-32C" :
+                                (mask & BR_CONTENT_CHECK) == 3 ? "XXH64" :
+                                                                 "XXH32",
+                                2 << (mask & 3), check);
                 }
                 update_check(&double_check, seq.buf + seq.next - n, n);
 
                 // write out uncompressed data
-                fwrite(un, 1, got, out);
-                if (ferror(out))
-                    throw(6, "write error");
+                if (write) {
+                    fwrite(un, 1, got, out);
+                    if (ferror(out))
+                        throw(6, "write error");
+                }
             }
             always
                 free(un);
@@ -263,15 +309,31 @@ int broad(FILE *in, FILE *out) {
         // fell out of the loop above with a trailer mask -- process trailer
         if (mask & BR_CONTENT_EXTRA_MASK)       // no extra on trailer
             throw(3, "invalid format -- extra on trailer");
-        if (mask & BR_CONTENT_OFF)              // reverse offset
+        if (verbose)
+            fputs("trailer\n", stderr);
+        if (mask & BR_CONTENT_OFF) {            // reverse offset
             if (curr - last != getbvar(&seq))
                 throw(3, "invalid format -- incorrect final reverse offset");
-        if (mask & BR_CONTENT_LEN)              // uncompressed length
+            if (verbose)
+                fprintf(stderr, "  offset %ju to previous header\n",
+                        curr - last);
+        }
+        if (mask & BR_CONTENT_LEN) {            // uncompressed length
             if (total != getbvar(&seq))
                 throw(5, "uncompressed total length mismatch");
+            if (verbose)
+                fprintf(stderr, "  total length %ju\n", total);
+        }
         if ((mask & BR_CONTENT_CHECK) != 7) {   // trailer check of checks
-            if (get_check(&double_check, mask) != getn(&seq, 1 << (mask & 3)))
+            uintmax_t check = getn(&seq, 1 << (mask & 3));
+            if (get_check(&double_check, mask) != check)
                 throw(5, "uncompressed double-check mismatch");
+            if (verbose)
+                fprintf(stderr, "  total %s %0*jx\n",
+                        (mask & BR_CONTENT_CHECK) >= 4 ? "CRC-32C" :
+                        (mask & BR_CONTENT_CHECK) == 3 ? "XXH64" :
+                                                         "XXH32",
+                        2 << (mask & 3), check);
         }
         if ((mask & BR_CONTENT_CHECK) != 7 ||
             (mask & (BR_CONTENT_LEN | BR_CONTENT_OFF)))
@@ -290,7 +352,27 @@ int broad(FILE *in, FILE *out) {
     return 0;
 }
 
-int main(void) {
-    broad(stdin, stdout);
+int main(int argc, char **argv) {
+    int verbose = 0;
+    int write = 1;
+    while (--argc) {
+        char *opt = *++argv;
+        if (*opt != '-') {
+            fprintf(stderr, "broad: %s ignored (not an option)\n", opt);
+            continue;
+        }
+        while (*++opt)
+            switch (*opt) {
+                case 'v':
+                    verbose = 1;
+                    break;
+                case 't':
+                    write = 0;
+                    break;
+                default:
+                    fprintf(stderr, "broad: unknown option %c\n", *opt);
+            }
+    }
+    broad(stdin, stdout, verbose, write);
     return 0;
 }
