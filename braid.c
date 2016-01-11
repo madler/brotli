@@ -282,13 +282,23 @@ local void copy(FILE *in, FILE *out, off_t *off, off_t *last, pos_t **pos,
         unsigned extra = getc(in);
         if ((extra & BR_EXTRA_CHECK) == 0)  // header check if in original
             head = NULL;
-        put1(extra, out, off, head);        // copy extra mask
-        if (extra & BR_EXTRA_MOD)
-            putvar(getvar(in), out, off, head); // copy mod time
+        unsigned strip = extra;             // output extra mask
+        if (*last != 4)                     // strip mod time and name
+            strip &= ~(BR_EXTRA_MOD | BR_EXTRA_NAME);
+        put1(strip, out, off, head);        // copy stripped extra mask
+        if (extra & BR_EXTRA_MOD) {
+            uintmax_t mod = getvar(in);     // get mod time
+            if (strip & BR_EXTRA_MOD)
+                putvar(mod, out, off, head);    // write mod time
+        }
         if (extra & BR_EXTRA_NAME) {
-            uintmax_t len = getvar(in);
-            putvar(len, out, off, head);    // copy name length
-            copyn(in, len, out, off, head); // copy name
+            uintmax_t len = getvar(in);     // get name length
+            if (strip & BR_EXTRA_NAME) {
+                putvar(len, out, off, head);    // write name length
+                copyn(in, len, out, off, head); // copy name
+            }
+            else
+                fseeko(in, len, SEEK_CUR);  // skip name
         }
         if (extra & BR_EXTRA_EXTRA) {
             uintmax_t len = getvar(in);
