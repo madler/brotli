@@ -11,7 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <stdarg.h>
+#include <time.h>
 #include <openssl/sha.h>
 #include "load.h"
 #include "yeast.h"
@@ -60,6 +62,19 @@ local size_t bvar(uintmax_t num, FILE *out) {
     return n;
 }
 
+// Write out a variable size integer, where the last byte has a high bit of
+// 1.  Return the number of bytes written.
+local size_t var(uintmax_t num, FILE *out) {
+    size_t n = 1;
+    while (num > 0x7f) {
+        putc(num & 0x7f, out);
+        num >>= 7;
+        n++;
+    }
+    putc(0x80 | num, out);
+    return n;
+}
+
 // Write the compressed stream br[0..len-1] wrapped with check value check.
 // opt provides these options to use for wrapping (any order):
 //
@@ -76,14 +91,16 @@ local size_t bvar(uintmax_t num, FILE *out) {
 //   b - include both length and offset in trailer
 //
 local void wrap(void const *brotli, size_t len, void const *un, size_t got,
-                char *opt, FILE *out) {
+                char *opt, char *name, FILE *out) {
     // defaults
     enum {
         xxh32, xxh64, crc32, sha256
     } check_type = xxh64;               // use xxh64
     size_t check_len = 8;               // all 8 bytes (required for xxh64)
-    int mod = 0;                        // true if base check type option seen
+    int set = 0;                        // true if base check type option seen
     int tail = BR_CONTENT_LEN | BR_CONTENT_OFF; // tail has length and offset
+    int mod = 0;                        // no mod time
+    int file = 0;                       // no filename
 
     // interpret options
     while (*opt) {
@@ -117,29 +134,29 @@ local void wrap(void const *brotli, size_t len, void const *un, size_t got,
             case 'c':
                 if (check_len > 4)
                     check_len = 4;
-                if (mod && check_type != crc32)
+                if (set && check_type != crc32)
                     warn("%c discarded -- using %d-byte CRC-32C",
                          check_type == sha256 ? 's' : 'x', check_len);
                 check_type = crc32;
-                mod = 1;
+                set = 1;
                 break;
             case 's':
-                if (mod && check_type != sha256)
+                if (set && check_type != sha256)
                     warn("%c discarded -- using 32-byte SHA-256",
                          check_type == crc32 ? 'c' : 'x');
                 check_type = sha256;
                 check_len = 32;
-                mod = 1;
+                set = 1;
                 break;
             case 'x':
                 if (check_len > 8)
                     check_len = 8;
-                if (mod && check_type != xxh32 && check_type != xxh64)
+                if (set && check_type != xxh32 && check_type != xxh64)
                     warn("%c discarded -- using %d-byte XXH%s",
                          check_type == crc32 ? 'c' : 's', check_len,
                          check_len < 8 ? "32" : "64");
                 check_type = check_len < 8 ? xxh32 : xxh64;
-                mod = 1;
+                set = 1;
                 break;
             case 'n':
                 tail = 0;
@@ -152,6 +169,12 @@ local void wrap(void const *brotli, size_t len, void const *un, size_t got,
                 break;
             case 'b':
                 tail = BR_CONTENT_LEN | BR_CONTENT_OFF;
+                break;
+            case 'm':
+                mod = 1;
+                break;
+            case 'f':
+                file = 1;
         }
 
         // process next option
@@ -181,11 +204,31 @@ local void wrap(void const *brotli, size_t len, void const *un, size_t got,
         case sha256:
             mask |= BR_CHECK_ID;
     }
+    if (mod || name)
+        mask |= BR_CONTENT_EXTRA_MASK;
     putc(mask ^ parity(mask), out);                 // write content mask byte
     writ++;
     if ((mask & 7) == BR_CHECK_ID) {
         putc(0, out);                               // write SHA-256 id byte
         writ++;
+    }
+    if (mask & BR_CONTENT_EXTRA_MASK) {
+        unsigned extra = 0;
+        if (mod)
+            extra |= BR_EXTRA_MOD;
+        if (name)
+            extra |= BR_EXTRA_NAME;
+        putc(extra ^ parity(extra), out);           // write extra mask byte
+        writ++;
+        if (mod) {
+            writ += var(time(NULL), out);
+        }
+        if (file) {
+            size_t len = strlen(name);
+            writ += var(len, out);
+            fwrite(name, 1, len, out);
+            writ += len;
+        }
     }
 
     // write compressed data
@@ -234,7 +277,11 @@ local void wrap(void const *brotli, size_t len, void const *un, size_t got,
 //  u - include just the uncompressed size (no reverse offset)
 //  r - include just the reverse offset (no uncompressed size)
 //  b - include both the uncompressed size and reverse offset -- default
+//  f - store second argument as file name (no 2nd arg uses "filename")
+//  m - save the current time as the mod time
 //
+// If there is a second argument, and the f option is provided, then the
+// second argument is stored as the file name.
 int main(int argc, char **argv) {
     // read in compressed data
     void *brotli = NULL;
@@ -255,7 +302,8 @@ int main(int argc, char **argv) {
     }
 
     // write out wrapped compressed data using defaults
-    wrap(brotli, len, un, got, argc > 1 ? argv[1] : "", stdout);
+    wrap(brotli, len, un, got,
+         argc > 1 ? argv[1] : "", argc > 2 ? argv[2] : "filename", stdout);
 
     // clean up
     free(un);
