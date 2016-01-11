@@ -298,6 +298,7 @@ int main(int argc, char **argv) {
     size_t got, used = len;
     ret = yeast(&un, &got, brotli, &used, 0);
     if (ret || used != len) {
+        free(un);
         fputs("wrap: error decompressing stream -- aborting\n", stderr);
         return 1;
     }
