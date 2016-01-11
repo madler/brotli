@@ -262,30 +262,42 @@ local void copy(FILE *in, FILE *out, off_t *off, off_t *last, pos_t **pos,
     XXH32_state_t *head = &xxh32;
     XXH32_reset(head, 0);
 
+    // peek ahead to get id and extra if present, strip extra of mod and/or
+    // name if this isn't the first segment
+    unsigned id = 0;
+    if ((mask & BR_CONTENT_CHECK) == 7)
+        id = getc(in);
+    unsigned extra = 0, strip = 0;
+    if (mask & BR_CONTENT_EXTRA_MASK) {
+        strip = extra = getc(in);
+        if (*last)
+            strip &= ~(BR_EXTRA_MOD | BR_EXTRA_NAME);
+        if ((extra & BR_EXTRA_CHECK) == 0)  // header check if in original
+            head = NULL;
+    }
+
     // write header content mask, and offset if not first segment
     {
-        if (*last) {
+        if (*last)
             mask |= BR_CONTENT_OFF;
-            mask ^= parity(mask);
-        }
+        unsigned newmask = mask;
+        if ((strip & BR_EXTRA_ANY) == 0)
+            newmask &= ~BR_CONTENT_EXTRA_MASK;
         off_t here = *off;
-        put1(mask, out, off, head);
+        put1(newmask ^ parity(newmask), out, off, head);
         if (*last)
             putvar(here - *last, out, off, head);
         *last = here;
     }
 
-    // copy the rest of the header
+    // write check ID, if present
     if ((mask & BR_CONTENT_CHECK) == 7)
-        put1(getc(in), out, off, head);     // copy check ID
+        put1(id, out, off, head);
+
+    // copy extra contents, leaving out mod and name if not first segment
     if (mask & BR_CONTENT_EXTRA_MASK) {
-        unsigned extra = getc(in);
-        if ((extra & BR_EXTRA_CHECK) == 0)  // header check if in original
-            head = NULL;
-        unsigned strip = extra;             // output extra mask
-        if (*last != 4)                     // strip mod time and name
-            strip &= ~(BR_EXTRA_MOD | BR_EXTRA_NAME);
-        put1(strip, out, off, head);        // copy stripped extra mask
+        if (strip & BR_EXTRA_ANY)
+            put1(strip ^ parity(strip), out, off, head);    // extra mask
         if (extra & BR_EXTRA_MOD) {
             uintmax_t mod = getvar(in);     // get mod time
             if (strip & BR_EXTRA_MOD)
@@ -307,7 +319,7 @@ local void copy(FILE *in, FILE *out, off_t *off, off_t *last, pos_t **pos,
         }
         if (extra & BR_EXTRA_COMPRESSION_MASK)
             put1(getc(in), out, off, head); // copy method mask
-        if (head != NULL) {
+        if (extra & BR_EXTRA_CHECK) {
             getc(in);  getc(in);            // skip old header check
             unsigned x = XXH32_digest(head) & 0xffff;
             put1(x & 0xff, out, off, NULL); // write new header check

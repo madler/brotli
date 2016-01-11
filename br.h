@@ -31,6 +31,7 @@
 #define BR_EXTRA_RESERVED 0x18      // must be zeros
 #define BR_EXTRA_CHECK 0x20         // header check is present
 #define BR_EXTRA_COMPRESSION_MASK 0x40  // Compression mask follows
+#define BR_EXTRA_ANY 0x67           // true if any valid are present
 
 // Compression Mask (high bit is parity)
 #define BR_COMPRESSION_METHOD 7     // compression method -- must be 0 (brotli)
