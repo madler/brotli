@@ -31,6 +31,7 @@ and * is repeated 0 or more times:
   ? offset to last header
   ? total uncompressed length
   ? check value of check values
+* trailing zeros
 
 .br streams intended for storage on seekable media should contain offsets to
 previous headers in the intermediate headers as well as the trailer, the total
@@ -182,7 +183,7 @@ Trailer structure:
 - content mask (1)
   ? offset to last header (v<>)
   ? total uncompressed length (v<>)
-  ? check value of check values
+  ? check value of check values (1, 2, 4, or 8)
   ? content mask repeated if and only if any of the above three are present (1)
 
 The total uncompressed length is the sum of the uncompressed lengths of the
@@ -199,6 +200,10 @@ header.
 The final repeat of the content mask must be present if any of the three
 optional items that precede it are present in the trailer.  It must not be
 present if none of the optional items are present.
+
+Trailing zeros:
+
+The trailer may be followed by any number of zero bytes for padding.
 
 
 Now we will cover the final layer of detail at the byte and bit level.
