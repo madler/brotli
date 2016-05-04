@@ -15,6 +15,7 @@
 #include <stdarg.h>
 #include <time.h>
 #include <openssl/sha.h>
+#include <sys/types.h>
 #include "load.h"
 #include "yeast.h"
 #include "br.h"

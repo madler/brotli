@@ -21,6 +21,18 @@ using namespace std;
 #include "huff.h"           // Huffman algorithm to make an optimal prefix code
 #include "flatten.h"        // Flatten a prefix code to a maximum bit length
 
+#if defined(__linux__) || defined(WIN32)
+static int digittoint(int c) {
+  if (!isxdigit(c)) {
+    return 0;
+  }
+  if (isdigit(c)) {
+    return c - '0';
+  }
+  return tolower(c) - 'a' + 10;
+}
+#endif
+
 // Command numbers for switch statement.
 enum command {
     BITS,
@@ -346,9 +358,7 @@ typedef vector<sym_t> desc_t;
 prefix_t complex(desc_t& desc) {
     // sort by symbols
     sort(desc.begin(), desc.end(),
-         [] (sym_t& a, sym_t& b) {
-             return a.second < b.second;
-         });
+         [](const sym_t& a, const sym_t& b) { return a.second < b.second; });
 
     // make a list of instructions to describe the code, making use of
     // run-length encoding where possible

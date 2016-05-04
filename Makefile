@@ -1,6 +1,6 @@
-CFLAGS=-O3 -Wall -Wextra -Wcast-qual -Wno-deprecated-declarations -DDEBUG
+CFLAGS=-O3 -std=c99 -Wall -Wextra -Wcast-qual -Wno-deprecated-declarations -DDEBUG
 CXXFLAGS=-O3 -Wall -Wextra -std=c++11
-LDFLAGS=-lpthread -lcrypto
+LDLIBS=-lpthread -lcrypto
 # -lcrypto is for openssl functions on Mac OS X -- other systems use -lssl
 
 all: deb juxt brogen brand broad braid brotli-02-edit.txt

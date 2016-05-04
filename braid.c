@@ -14,6 +14,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <sys/types.h>
 #include "br.h"
 #include "xxhash.h"
 #include "try.h"
