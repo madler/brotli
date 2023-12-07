@@ -134,14 +134,9 @@ static inline uint32_t crc32c_shift(uint32_t zeros[][256], uint32_t crc) {
 }
 
 /* Block sizes for three-way parallel crc computation.  LONG and SHORT must
-   both be powers of two.  The associated string constants must be set
-   accordingly, for use in constructing the assembler instructions. */
+   both be powers of two. */
 #define LONG 8192
-#define LONGx1 "8192"
-#define LONGx2 "16384"
 #define SHORT 256
-#define SHORTx1 "256"
-#define SHORTx2 "512"
 
 /* Tables for hardware crc that shift a crc by LONG and SHORT zeros. */
 static pthread_once_t crc32c_once_hw = PTHREAD_ONCE_INIT;
