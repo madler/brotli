@@ -10,9 +10,9 @@ static inline int more(FILE *in) {
 
 // See load.h for description.
 int load(FILE *in, size_t limit, void **dat, size_t *size, size_t *len) {
-    // if no input limit, then set it to the maximum size_t value
+    // if no input limit, then set it to the maximum ptrdiff_t value
     if (limit == 0)
-        limit--;
+        limit = (size_t)-1 >> 1;
 
     // no bytes read so far
     *len = 0;
